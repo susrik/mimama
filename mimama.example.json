@@ -1,0 +1,30 @@
+{
+  "notes_root": "/data/notes",
+  "llm": {
+    "base_url": "http://litellm.example:4000/v1",
+    "api_key": "sk-REPLACE-ME",
+    "model": "gpt-4o"
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 8000,
+    "url": "http://localhost:8000"
+  },
+  "user": {
+    "name": "Erik Reid",
+    "aliases": ["Erik", "erik.reid"]
+  },
+  "listeners": {
+    "discord": {
+      "enabled": false,
+      "token": "REPLACE-WITH-DISCORD-BOT-TOKEN"
+    }
+  },
+  "mcp": {
+    "http_enabled": true
+  },
+  "query": {
+    "max_candidates": 20,
+    "excerpt_chars": 1200
+  }
+}

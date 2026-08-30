@@ -1,0 +1,9 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">Saved: {{ path }}</h2>
+    <pre class="whitespace-pre-wrap text-sm bg-base-200 p-4 rounded">{{ content }}</pre>
+    <div class="card-actions">
+      <button class="btn btn-ghost btn-sm" hx-get="/gui/tree" hx-target="#main">Back to browse</button>
+    </div>
+  </div>
+</div>

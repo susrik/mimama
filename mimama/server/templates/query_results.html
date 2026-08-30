@@ -1,0 +1,19 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">Results for: {{ question }}</h2>
+    {% if results %}
+    <ul class="space-y-2">
+      {% for r in results %}
+      <li class="border-b border-base-200 pb-2">
+        <a class="link font-mono" hx-get="/gui/note?path={{ r.path | urlencode }}" hx-target="#main">{{ r.path }}</a>
+        <span class="badge badge-ghost">{{ r.note_date }}</span>
+        {% if r.reason %}<div class="text-sm italic">{{ r.reason }}</div>{% endif %}
+        <div class="text-xs opacity-70">{{ r.snippet }}</div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p>No matching notes.</p>
+    {% endif %}
+  </div>
+</div>

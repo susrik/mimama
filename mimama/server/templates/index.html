@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="corporate">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mimama</title>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.14/dist/full.min.css" rel="stylesheet" type="text/css" />
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="min-h-screen bg-base-200">
+  <div class="navbar bg-base-100 shadow">
+    <span class="text-xl font-bold px-4">mimama</span>
+    <button class="btn btn-ghost" hx-get="/gui/tree" hx-target="#main">Browse</button>
+    <button class="btn btn-ghost" hx-get="/gui/convert" hx-target="#main">Convert transcript</button>
+  </div>
+
+  <div class="p-4 max-w-4xl mx-auto space-y-4">
+    <form hx-post="/gui/query" hx-target="#main" class="flex gap-2">
+      <input type="text" name="question" placeholder="Ask about your notes…"
+             class="input input-bordered flex-1" required>
+      <button type="submit" class="btn btn-primary">Query</button>
+    </form>
+
+    <div id="main" hx-get="/gui/tree" hx-trigger="load"></div>
+  </div>
+</body>
+</html>

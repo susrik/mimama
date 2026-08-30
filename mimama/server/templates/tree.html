@@ -1,0 +1,21 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">/{{ path }}</h2>
+    <ul class="menu">
+      {% if parent is not none %}
+      <li><a hx-get="/gui/tree?path={{ parent | urlencode }}" hx-target="#main">⬆︎ ..</a></li>
+      {% endif %}
+      {% for entry in entries %}
+      <li>
+        {% if entry.is_dir %}
+        <a hx-get="/gui/tree?path={{ entry.path | urlencode }}" hx-target="#main">
+          📁 {{ entry.name }}{% if entry.has_context %} <span class="badge badge-sm">context</span>{% endif %}
+        </a>
+        {% else %}
+        <a hx-get="/gui/note?path={{ entry.path | urlencode }}" hx-target="#main">📄 {{ entry.name }}</a>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</div>

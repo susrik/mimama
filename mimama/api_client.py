@@ -1,0 +1,94 @@
+"""Typed HTTP client for the mimama /api surface.
+
+Shared by the CLI, the listener command router, and the MCP tools — all
+requests/responses use the pydantic models from :mod:`mimama.server.schemas`.
+"""
+
+from __future__ import annotations
+
+import httpx
+
+from mimama.server import schemas
+
+
+class APIError(Exception):
+    """The mimama server returned an error."""
+
+
+class APIClient:
+    """Small typed client for the mimama /api surface."""
+
+    def __init__(
+        self,
+        server_url: str,
+        timeout: float = 120.0,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        """``transport`` lets tests route requests to an in-process ASGI app."""
+        self._client = httpx.Client(
+            base_url=server_url, timeout=timeout, transport=transport
+        )
+
+    def _check(self, response: httpx.Response) -> httpx.Response:
+        if response.is_error:
+            try:
+                detail = schemas.ErrorResponse.model_validate_json(
+                    response.text
+                ).detail
+            except ValueError:
+                detail = response.text
+            raise APIError(detail)
+        return response
+
+    def tree(self, path: str = "") -> schemas.TreeResponse:
+        r = self._check(self._client.get("/api/tree", params={"path": path}))
+        return schemas.TreeResponse.model_validate_json(r.text)
+
+    def folders(self) -> schemas.FoldersResponse:
+        r = self._check(self._client.get("/api/folders"))
+        return schemas.FoldersResponse.model_validate_json(r.text)
+
+    def read_note(self, path: str) -> schemas.NoteContent:
+        r = self._check(self._client.get("/api/note", params={"path": path}))
+        return schemas.NoteContent.model_validate_json(r.text)
+
+    def write_note(self, path: str, content: str) -> schemas.NoteWriteResponse:
+        body = schemas.NoteWriteRequest(path=path, content=content)
+        r = self._check(self._client.put("/api/note", json=body.model_dump()))
+        return schemas.NoteWriteResponse.model_validate_json(r.text)
+
+    def context(self, path: str = "") -> schemas.ContextResponse:
+        r = self._check(self._client.get("/api/context", params={"path": path}))
+        return schemas.ContextResponse.model_validate_json(r.text)
+
+    def search(
+        self, terms: list[str], subtree: str = "", any_of: bool = True
+    ) -> schemas.SearchResponse:
+        body = schemas.SearchRequest(terms=terms, subtree=subtree, any_of=any_of)
+        r = self._check(self._client.post("/api/search", json=body.model_dump()))
+        return schemas.SearchResponse.model_validate_json(r.text)
+
+    def convert(
+        self, folder: str, transcript: str, filename: str | None = None
+    ) -> schemas.OperationResponse:
+        body = schemas.ConvertRequest(
+            folder=folder, transcript=transcript, filename=filename
+        )
+        r = self._check(
+            self._client.post("/api/operations/convert", json=body.model_dump())
+        )
+        return schemas.OperationResponse.model_validate_json(r.text)
+
+    def cleanup(self, path: str) -> schemas.OperationResponse:
+        body = schemas.CleanupRequest(path=path)
+        r = self._check(
+            self._client.post("/api/operations/cleanup", json=body.model_dump())
+        )
+        return schemas.OperationResponse.model_validate_json(r.text)
+
+    def query(self, question: str) -> schemas.QueryResponse:
+        body = schemas.QueryRequest(question=question)
+        r = self._check(self._client.post("/api/query", json=body.model_dump()))
+        return schemas.QueryResponse.model_validate_json(r.text)
+
+

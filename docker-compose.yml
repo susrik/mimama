@@ -1,0 +1,13 @@
+services:
+  mimama:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./mimama.json:/config/mimama.json:ro
+      - notes:/data/notes
+    environment:
+      MIMAMA_CONFIG_FILENAME: /config/mimama.json
+
+volumes:
+  notes:
