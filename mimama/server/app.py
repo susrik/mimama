@@ -25,7 +25,7 @@ def create_app(
         config = load_config()
     if llm is None:
         llm = LLMClient(config.llm)
-    store = NoteStore(root=config.notes_root)
+    store = NoteStore(root=config.notes.root)
 
     # imported here to avoid import cycles (routers import nothing from app)
     from mimama.listeners import start_enabled_listeners

@@ -24,7 +24,8 @@ class TranscriptsConfig(BaseModel):
     ffmpeg: str = "ffmpeg"
     """Path to ffmpeg executable. Default is just 'ffmpeg' to let shell find it."""
 
-    whisper: WhisperConfig = Field(default_factory=lambda: WhisperConfig(cli="whisper-cli"))
+    whisper: WhisperConfig
+    """Configuration for whisper-cli tool."""
 
 
 class WhisperConfig(BaseModel):
@@ -33,7 +34,7 @@ class WhisperConfig(BaseModel):
     cli: str = "whisper-cli"
     """Path to whisper-cli executable. Default is just 'whisper-cli' to let shell find it."""
 
-    model: str | None = None
+    model: str
     """Path to the whisper model file (e.g. ~/bin/whisper-models/ggml-large-v3-turbo.bin)."""
 
 
@@ -96,6 +97,7 @@ class QueryConfig(BaseModel):
 class Config(BaseModel):
     notes: NotesConfig
     llm: LLMConfig
+    transcripts: TranscriptsConfig
     server: ServerConfig = Field(default_factory=ServerConfig)
     user: UserConfig = Field(default_factory=UserConfig)
     listeners: ListenersConfig = Field(default_factory=ListenersConfig)

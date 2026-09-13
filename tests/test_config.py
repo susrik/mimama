@@ -18,11 +18,22 @@ from mimama.config import (
 
 def valid_config_dict(notes_root: str) -> dict[str, object]:
     return {
-        "notes_root": notes_root,
+        "notes": {
+            "root": notes_root,
+            "git": False,
+            "git_exe": "git"
+        },
         "llm": {
             "base_url": "http://llm.example/v1",
             "api_key": "sk-test",
             "model": "test-model",
+        },
+        "transcripts": {
+            "ffmpeg": "ffmpeg",
+            "whisper": {
+                "cli": "whisper-cli",
+                "model": "~/bin/whisper-models/ggml-large-v3-turbo.bin"
+            }
         },
     }
 
@@ -83,6 +94,24 @@ class TestLoadConfig:
     def test_invalid_schema(self, tmp_path: Path) -> None:
         bad = write_config(tmp_path / "bad.json", {"notes_root": str(tmp_path)})
         with pytest.raises(ConfigError, match="invalid"):
+            load_config(bad)
+
+    def test_missing_transcripts_config(self, tmp_path: Path) -> None:
+        # Test that missing transcripts config fails validation
+        data = valid_config_dict(str(tmp_path))
+        # Remove transcripts section to test missing required field
+        del data["transcripts"]
+        bad = write_config(tmp_path / "bad.json", data)
+        with pytest.raises(ConfigError, match="transcripts"):
+            load_config(bad)
+
+    def test_invalid_whisper_config(self, tmp_path: Path) -> None:
+        # Test that missing whisper model fails validation
+        data = valid_config_dict(str(tmp_path))
+        # Remove model from whisper config to test required field
+        del data["transcripts"]["whisper"]["model"]
+        bad = write_config(tmp_path / "bad.json", data)
+        with pytest.raises(ConfigError, match="model"):
             load_config(bad)
 
     def test_filename_from_env_var(
