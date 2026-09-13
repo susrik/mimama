@@ -11,7 +11,12 @@
 Both run the same two external commands in a fresh temp directory:
 
     ffmpeg -i <file>.m4a -ar 16000 -ac 1 -c:a pcm_s16le <tmp>/<file>.wav
-    whisper-cli -mc 0 -m <model> -f <file>.wav -otxt
+    whisper-cli -mc 0 -m <model> -f <file>.wav -otxt -of <tmp>/<file>
+
+Note on ``-of``: whisper-cli's default output naming appends ``.txt`` to the
+*full* input filename (e.g. ``<file>.wav.txt``), not to its stem. We always
+pass ``-of`` explicitly so the resulting ``.txt`` path is known exactly,
+rather than depending on that (version-specific) default naming convention.
 """
 
 from __future__ import annotations
@@ -39,7 +44,17 @@ def _expand_path(path: str) -> str:
     return os.path.expanduser(os.path.expandvars(path))
 
 
-def _whisper_command(config: Config, model_path: str | None, audio_path: Path) -> list[str]:
+def _whisper_command(
+    config: Config, model_path: str | None, audio_path: Path, output_stem: Path
+) -> list[str]:
+    """Build the whisper-cli command.
+
+    ``output_stem`` is passed via ``-of`` (output file path, without
+    extension) so we know exactly where the ``.txt`` transcript will land,
+    rather than relying on whisper-cli's default naming convention (which
+    appends ``.txt`` to the *full* input filename, e.g. ``foo.wav.txt`` —
+    not ``foo.txt``).
+    """
     model = (
         _expand_path(model_path) if model_path else _expand_path(config.transcripts.whisper.model)
     )
@@ -49,6 +64,7 @@ def _whisper_command(config: Config, model_path: str | None, audio_path: Path) -
         "-m", model,
         "-f", str(audio_path),
         "-otxt",
+        "-of", str(output_stem),
     ]
 
 
@@ -100,7 +116,9 @@ def run_transcription_pipeline(
             raise RuntimeError(f"unsupported audio format: {working_audio.suffix}")
 
         result = subprocess.run(
-            _whisper_command(config, model_path, working_audio),
+            _whisper_command(
+                config, model_path, working_audio, temp_dir_path / working_audio.stem
+            ),
             capture_output=True, text=True, check=False, cwd=temp_dir,
         )
         if result.returncode != 0:
@@ -163,7 +181,10 @@ class TranscriptionJob:
                     raise RuntimeError(f"unsupported audio format: {audio_path.suffix}")
 
                 rc = self._run_streamed(
-                    _whisper_command(self.config, None, audio_path), temp_dir_path
+                    _whisper_command(
+                        self.config, None, audio_path, temp_dir_path / audio_path.stem
+                    ),
+                    temp_dir_path,
                 )
                 if rc != 0:
                     raise RuntimeError("whisper-cli failed (see console output)")

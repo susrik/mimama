@@ -13,6 +13,7 @@ from mimama.core.transcribe import (
     DONE,
     TranscriptionJob,
     TranscriptionJobRegistry,
+    _whisper_command,
     run_transcription_pipeline,
 )
 
@@ -32,10 +33,10 @@ def _fake_run_factory(write_txt: bool = True, ffmpeg_rc: int = 0, whisper_rc: in
                 out.write_bytes(b"fake-wav")
             return _FakeCompleted(returncode=ffmpeg_rc, stderr="ffmpeg boom" if ffmpeg_rc else "")
         if "whisper" in cmd[0]:
-            f_index = cmd.index("-f")
-            audio_path = Path(cmd[f_index + 1])
+            of_index = cmd.index("-of")
+            output_stem = Path(cmd[of_index + 1])
             if whisper_rc == 0 and write_txt:
-                (Path(cwd) / f"{audio_path.stem}.txt").write_text(
+                output_stem.with_suffix(".txt").write_text(
                     "hello transcript", encoding="utf-8"
                 )
             return _FakeCompleted(
@@ -44,6 +45,19 @@ def _fake_run_factory(write_txt: bool = True, ffmpeg_rc: int = 0, whisper_rc: in
         raise AssertionError(f"unexpected command: {cmd}")
 
     return _fake_run
+
+
+class TestWhisperCommand:
+    def test_passes_explicit_output_stem(self, config: Config, tmp_path: Path) -> None:
+        # Regression test for the bug where we relied on whisper-cli's default
+        # output-naming convention (append ".txt" to the *full* input filename,
+        # e.g. "meeting.wav.txt") instead of the file's stem ("meeting.txt").
+        # We now always pass "-of" explicitly so the resulting path is known.
+        audio_path = tmp_path / "meeting.wav"
+        output_stem = tmp_path / "meeting"
+        cmd = _whisper_command(config, None, audio_path, output_stem)
+        assert "-of" in cmd
+        assert cmd[cmd.index("-of") + 1] == str(output_stem)
 
 
 class TestRunTranscriptionPipelineWav:
@@ -140,10 +154,10 @@ def _fake_popen_factory(write_txt: bool = True, ffmpeg_rc: int = 0, whisper_rc: 
                 self.stdout = iter(["converting\n", "done\n"])
                 self._rc = ffmpeg_rc
             else:
-                f_index = cmd.index("-f")
-                audio_path = Path(cmd[f_index + 1])
+                of_index = cmd.index("-of")
+                output_stem = Path(cmd[of_index + 1])
                 if whisper_rc == 0 and write_txt:
-                    (Path(cwd) / f"{audio_path.stem}.txt").write_text(
+                    output_stem.with_suffix(".txt").write_text(
                         "streamed transcript", encoding="utf-8"
                     )
                 self.stdout = iter(["loading model\n", "transcribing\n"])
