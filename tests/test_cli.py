@@ -16,8 +16,9 @@ from tests.fakes import FakeLLMClient
 @pytest.fixture()
 def config_file(tmp_path: Path, notes_root: Path) -> Path:
     cfg = {
-        "notes_root": str(notes_root),
+        "notes": {"root": str(notes_root), "git": False},
         "llm": {"base_url": "http://x/v1", "api_key": "k", "model": "m"},
+        "transcripts": {"whisper": {"model": "/fake/models/ggml-test.bin"}},
     }
     path = tmp_path / "cli-config.json"
     path.write_text(json.dumps(cfg), encoding="utf-8")

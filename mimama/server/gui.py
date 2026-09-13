@@ -1,4 +1,6 @@
-"""/gui (+ /) — GUI-internal htmx surface. HTML in, HTML out.
+"""/gui (+ /) — GUI-internal htmx surface. HTML in, HTML out (except the small
+JSON job-id response from the transcription upload endpoint, consumed by a
+few lines of inline JS, and the SSE console stream).
 
 These endpoints serve pages and fragments for the web UI and are free to
 change with it; external clients must use /api instead.
@@ -6,20 +8,29 @@ change with it; external clients must use /api instead.
 
 from __future__ import annotations
 
-from pathlib import Path
+import json
+from collections.abc import Iterator
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Form, Request, UploadFile
+from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from mimama.config import Config
-from mimama.core.context import assemble_context
+from mimama.core.context import assemble_context, list_context_files
+from mimama.core.git_ops import git_enabled, stage_file
 from mimama.core.llm import LLMError, SupportsComplete
+from mimama.core.naming import default_note_filename
 from mimama.core.notes import NoteError, NoteStore
-from mimama.core.operations import cleanup_note, transcript_to_minutes
+from mimama.core.operations import (
+    DEFAULT_TRANSCRIPT_INSTRUCTIONS,
+    cleanup_note,
+    generate_note_content,
+    transcript_to_minutes,
+)
 from mimama.core.query import QueryError, run_query
-from mimama.core.transcribe import run_transcription_pipeline
+from mimama.core.transcribe import DONE, TranscriptionJobRegistry
 
 router = APIRouter()
 
@@ -39,6 +50,18 @@ def _llm(request: Request) -> SupportsComplete:
 def _config(request: Request) -> Config:
     config: Config = request.app.state.config
     return config
+
+
+def _jobs(request: Request) -> TranscriptionJobRegistry:
+    registry: TranscriptionJobRegistry = request.app.state.transcription_jobs
+    return registry
+
+
+def _maybe_stage(config: Config, *paths: str) -> None:
+    """Stage the given note paths if git integration is enabled."""
+    if git_enabled(config):
+        for path in paths:
+            stage_file(config, path)
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -63,26 +86,91 @@ def tree(request: Request, path: str = "") -> HTMLResponse:
 
 @router.get("/gui/note/create", response_class=HTMLResponse)
 def create_note_form(request: Request, path: str = "") -> HTMLResponse:
-    return templates.TemplateResponse(request, "create_note.html", {"path": path})
+    store = _store(request)
+    context_files = list_context_files(store, path) if path else list_context_files(store, "")
+    return templates.TemplateResponse(
+        request,
+        "new_note.html",
+        {
+            "folder": path,
+            "default_filename": default_note_filename(),
+            "context_files": context_files,
+            "default_transcript_instructions": DEFAULT_TRANSCRIPT_INSTRUCTIONS,
+        },
+    )
 
 
 @router.post("/gui/note/create", response_class=HTMLResponse)
 def create_note_submit(
     request: Request,
-    path: Annotated[str, Form()],
+    folder: Annotated[str, Form()] = "",
+    filename: Annotated[str, Form()] = "",
     content: Annotated[str, Form()] = "",
+    ai: Annotated[str | None, Form()] = None,
+    context: Annotated[str, Form()] = "",
+    transcript: Annotated[str | None, Form()] = None,
+    transcript_instructions: Annotated[str, Form()] = "",
 ) -> HTMLResponse:
+    store = _store(request)
+    config = _config(request)
+    filename = filename or default_note_filename()
+    target = (PurePosixPath(folder) / filename).as_posix()
+
     try:
-        store = _store(request)
-        full_path = (path + "/" + "new-note.md").lstrip("/")
-        result = store.write(full_path, content or "")
-    except NoteError as exc:
+        if ai and transcript:
+            result = transcript_to_minutes(
+                store,
+                _llm(request),
+                folder,
+                content,
+                filename=filename,
+                instructions=transcript_instructions or None,
+            )
+            path, written_content = result.path, result.content
+        elif ai:
+            written_content = generate_note_content(store, _llm(request), target, context, content)
+            path = store.write(target, written_content)
+        else:
+            written_content = content
+            path = store.write(target, written_content)
+    except (NoteError, LLMError) as exc:
         return _error(request, str(exc))
 
-    # Redirect to the new note
+    _maybe_stage(config, path)
     return templates.TemplateResponse(
-        request, "note.html", {"path": full_path, "content": content or "", "context": ""}
+        request, "result.html", {"path": path, "content": written_content}
     )
+
+
+@router.post("/gui/transcribe/start")
+async def transcribe_start(
+    request: Request, audio_file: UploadFile
+) -> dict[str, str]:
+    config = _config(request)
+    audio_bytes = await audio_file.read()
+    job = _jobs(request).create(config, audio_file.filename or "upload.wav", audio_bytes)
+    return {"job_id": job.id}
+
+
+@router.get("/gui/transcribe/stream/{job_id}")
+def transcribe_stream(request: Request, job_id: str) -> StreamingResponse:
+    registry = _jobs(request)
+    job = registry.get(job_id)
+
+    def _events() -> Iterator[str]:
+        if job is None:
+            yield f"event: done\ndata: {json.dumps({'error': 'unknown transcription job'})}\n\n"
+            return
+        while True:
+            line = job.lines.get()
+            if line is DONE:
+                payload = {"transcript": job.transcript, "error": job.error}
+                yield f"event: done\ndata: {json.dumps(payload)}\n\n"
+                registry.discard(job_id)
+                return
+            yield f"data: {json.dumps(str(line))}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
 
 
 @router.get("/gui/note/rename", response_class=HTMLResponse)
@@ -113,6 +201,7 @@ def rename_note_submit(
     except NoteError as exc:
         return _error(request, str(exc))
 
+    _maybe_stage(_config(request), old_path, new_path)
     # Redirect to the renamed note
     return templates.TemplateResponse(
         request, "note.html", {"path": new_path, "content": store.read(new_path), "context": ""}
@@ -130,6 +219,7 @@ def delete_note_submit(request: Request, path: Annotated[str, Form()]) -> HTMLRe
     except NoteError as exc:
         return _error(request, str(exc))
 
+    _maybe_stage(_config(request), path)
     # Redirect to parent directory
     parent = "/".join(path.split("/")[:-1]) if path else ""
     return templates.TemplateResponse(
@@ -152,67 +242,13 @@ def note(request: Request, path: str) -> HTMLResponse:
     )
 
 
-@router.get("/gui/convert", response_class=HTMLResponse)
-def convert_form(request: Request) -> HTMLResponse:
-    folders = _store(request).list_folders()
-    return templates.TemplateResponse(request, "convert.html", {"folders": folders})
-
-
-@router.post("/gui/transcribe", response_class=HTMLResponse)
-def transcribe_submit(
-    request: Request,
-    audio_file: Annotated[str, Form()],
-    model_path: Annotated[str | None, Form()] = None,
-) -> HTMLResponse:
-    try:
-        # For now, we'll just handle the file upload in a basic way
-        # In a real implementation, you'd want to handle file uploads properly
-        result = run_transcription_pipeline(
-            _config(request),
-            audio_file,
-            model_path,
-        )
-    except (NoteError, LLMError) as exc:
-        return _error(request, str(exc))
-
-    return templates.TemplateResponse(
-        request, "transcription_result.html", {"transcript": result}
-    )
-
-
-@router.get("/gui/transcribe-form", response_class=HTMLResponse)
-def transcribe_form(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(request, "transcribe.html")
-
-
-@router.post("/gui/convert", response_class=HTMLResponse)
-def convert_submit(
-    request: Request,
-    folder: Annotated[str, Form()],
-    transcript: Annotated[str, Form()],
-    filename: Annotated[str, Form()] = "",
-) -> HTMLResponse:
-    try:
-        result = transcript_to_minutes(
-            _store(request),
-            _llm(request),
-            folder,
-            transcript,
-            filename=filename or None,
-        )
-    except (NoteError, LLMError) as exc:
-        return _error(request, str(exc))
-    return templates.TemplateResponse(
-        request, "result.html", {"path": result.path, "content": result.content}
-    )
-
-
 @router.post("/gui/cleanup", response_class=HTMLResponse)
 def cleanup_submit(request: Request, path: Annotated[str, Form()]) -> HTMLResponse:
     try:
         result = cleanup_note(_store(request), _llm(request), path)
     except (NoteError, LLMError) as exc:
         return _error(request, str(exc))
+    _maybe_stage(_config(request), result.path)
     return templates.TemplateResponse(
         request, "result.html", {"path": result.path, "content": result.content}
     )
@@ -234,7 +270,8 @@ def inference_submit(
 ) -> HTMLResponse:
     try:
         result = _llm(request).complete(
-            system=assemble_context(_store(request), path) or "You are an assistant that manages a tree of markdown meeting notes.",
+            system=assemble_context(_store(request), path)
+            or "You are an assistant that manages a tree of markdown meeting notes.",
             user=prompt,
         )
     except (NoteError, LLMError) as exc:

@@ -19,11 +19,9 @@ You are an assistant that manages a tree of markdown meeting notes.
 Output ONLY the markdown document, no surrounding commentary or code fences.
 """
 
-_CONVERT_INSTRUCTIONS = """\
-Convert the following raw meeting transcript into well-structured meeting
-minutes in markdown. Include: a title, the date if known, attendees if
-identifiable, a concise summary, key discussion points, decisions, and action
-items (with owners where identifiable).
+DEFAULT_TRANSCRIPT_INSTRUCTIONS = """\
+Read the following transcript and produce meeting minutes, noting important \
+topics, open questions, action items and other highlights.\
 """
 
 _CLEANUP_INSTRUCTIONS = """\
@@ -56,16 +54,38 @@ def transcript_to_minutes(
     folder: str,
     transcript: str,
     filename: str | None = None,
+    instructions: str | None = None,
 ) -> OperationResult:
-    """Convert a raw transcript to meeting minutes, written into ``folder``."""
+    """Convert a raw transcript to meeting minutes, written into ``folder``.
+
+    ``instructions`` is the (editable, GUI-supplied) prompt describing what to
+    do with the transcript; it defaults to :data:`DEFAULT_TRANSCRIPT_INSTRUCTIONS`.
+    """
     filename = filename or default_minutes_filename()
     target = (PurePosixPath(folder) / filename).as_posix()
     content = llm.complete(
         system=_system_prompt(store, folder),
-        user=f"{_CONVERT_INSTRUCTIONS}\n--- TRANSCRIPT ---\n{transcript}",
+        user=f"{instructions or DEFAULT_TRANSCRIPT_INSTRUCTIONS}\n--- TRANSCRIPT ---\n{transcript}",
     )
     written = store.write(target, content)
     return OperationResult(path=written, content=content)
+
+
+def generate_note_content(
+    store: NoteStore,
+    llm: SupportsComplete,
+    path: str,
+    context: str,
+    content: str,
+) -> str:
+    """Run a free-form AI generation for the "new file" flow.
+
+    ``context`` and ``content`` (the user-supplied "context" and "content"
+    fields from the new-file dialog) become the prompt; ``path``'s folder
+    supplies the hierarchical AGENTS.md system context.
+    """
+    user = f"{context}\n\n{content}".strip() if context else content
+    return llm.complete(system=_system_prompt(store, path), user=user)
 
 
 def cleanup_note(

@@ -33,11 +33,14 @@ def notes_root(tmp_path: Path) -> Path:
 def config(notes_root: Path) -> Config:
     return Config.model_validate(
         {
-            "notes_root": str(notes_root),
+            "notes": {"root": str(notes_root), "git": False},
             "llm": {
                 "base_url": "http://llm.test/v1",
                 "api_key": "sk-test",
                 "model": "test-model",
+            },
+            "transcripts": {
+                "whisper": {"model": "/fake/models/ggml-test.bin"},
             },
             "user": {"name": "Erik Reid", "aliases": ["Erik"]},
         }

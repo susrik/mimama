@@ -47,7 +47,7 @@ class TestLoadConfig:
     def test_minimal_valid_config(self, tmp_path: Path) -> None:
         cfg_file = write_config(tmp_path / "c.json", valid_config_dict(str(tmp_path)))
         cfg = load_config(cfg_file)
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
         assert cfg.llm.model == "test-model"
 
     def test_defaults_applied(self, tmp_path: Path) -> None:
@@ -120,7 +120,7 @@ class TestLoadConfig:
         cfg_file = write_config(tmp_path / "env.json", valid_config_dict(str(tmp_path)))
         monkeypatch.setenv(CONFIG_ENV_VAR, str(cfg_file))
         cfg = load_config()
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
 
     def test_default_filename_without_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -129,7 +129,7 @@ class TestLoadConfig:
         monkeypatch.chdir(tmp_path)
         write_config(tmp_path / "mimama.json", valid_config_dict(str(tmp_path)))
         cfg = load_config()
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
 
 
 class TestClickConfigCallback:
@@ -138,7 +138,7 @@ class TestClickConfigCallback:
         @click.command()
         @click.option("--config", callback=click_config_callback)
         def cli(config: Config) -> None:
-            click.echo(f"root={config.notes_root}")
+            click.echo(f"root={config.notes.root}")
 
         return cli
 

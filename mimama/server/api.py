@@ -76,20 +76,23 @@ def read_note(store: Store, path: str) -> schemas.NoteContent:
 
 
 @router.put("/note", response_model=schemas.NoteWriteResponse)
-def write_note(store: Store, body: schemas.NoteWriteRequest, request: Request) -> schemas.NoteWriteResponse:
+def write_note(
+    store: Store, config: Conf, body: schemas.NoteWriteRequest
+) -> schemas.NoteWriteResponse:
     try:
         written = store.write(body.path, body.content)
     except NoteError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # If git is enabled, stage the file
-    config = get_config(request)
     if git_enabled(config):
         stage_file(config, body.path)
     return schemas.NoteWriteResponse(path=written)
 
 
 @router.delete("/note", response_model=schemas.NoteDeleteResponse)
-def delete_note(store: Store, body: schemas.NoteDeleteRequest) -> schemas.NoteDeleteResponse:
+def delete_note(
+    store: Store, config: Conf, body: schemas.NoteDeleteRequest
+) -> schemas.NoteDeleteResponse:
     try:
         path = store.resolve(body.path)
         if not path.is_file():
@@ -98,14 +101,15 @@ def delete_note(store: Store, body: schemas.NoteDeleteRequest) -> schemas.NoteDe
     except NoteError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     # If git is enabled, stage the deletion
-    config = get_config(request)
     if git_enabled(config):
         stage_file(config, body.path)
     return schemas.NoteDeleteResponse(path=body.path)
 
 
 @router.post("/note/rename", response_model=schemas.NoteRenameResponse)
-def rename_note(store: Store, body: schemas.NoteRenameRequest) -> schemas.NoteRenameResponse:
+def rename_note(
+    store: Store, config: Conf, body: schemas.NoteRenameRequest
+) -> schemas.NoteRenameResponse:
     try:
         old_path = store.resolve(body.old_path)
         if not old_path.is_file():
@@ -117,7 +121,6 @@ def rename_note(store: Store, body: schemas.NoteRenameRequest) -> schemas.NoteRe
     except NoteError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # If git is enabled, stage both files
-    config = get_config(request)
     if git_enabled(config):
         stage_file(config, body.old_path)
         stage_file(config, body.new_path)
@@ -125,14 +128,15 @@ def rename_note(store: Store, body: schemas.NoteRenameRequest) -> schemas.NoteRe
 
 
 @router.post("/note/create", response_model=schemas.NoteCreateResponse)
-def create_note(store: Store, body: schemas.NoteCreateRequest) -> schemas.NoteCreateResponse:
+def create_note(
+    store: Store, config: Conf, body: schemas.NoteCreateRequest
+) -> schemas.NoteCreateResponse:
     try:
         # Create the note with default content
         path = store.write(body.path, body.content or "")
     except NoteError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # If git is enabled, stage the new file
-    config = get_config(request)
     if git_enabled(config):
         stage_file(config, body.path)
     return schemas.NoteCreateResponse(path=path)
@@ -140,7 +144,6 @@ def create_note(store: Store, body: schemas.NoteCreateRequest) -> schemas.NoteCr
 
 @router.post("/transcribe", response_model=schemas.TranscriptionResponse)
 def transcribe(
-    request: Request,
     config: Conf,
     body: schemas.TranscriptionRequest
 ) -> schemas.TranscriptionResponse:
@@ -181,7 +184,7 @@ def search(store: Store, body: schemas.SearchRequest) -> schemas.SearchResponse:
 
 @router.post("/operations/convert", response_model=schemas.OperationResponse)
 def convert(
-    store: Store, llm: LLM, body: schemas.ConvertRequest
+    store: Store, llm: LLM, config: Conf, body: schemas.ConvertRequest
 ) -> schemas.OperationResponse:
     try:
         result = transcript_to_minutes(
@@ -191,12 +194,14 @@ def convert(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if git_enabled(config):
+        stage_file(config, result.path)
     return schemas.OperationResponse(path=result.path, content=result.content)
 
 
 @router.post("/operations/cleanup", response_model=schemas.OperationResponse)
 def cleanup(
-    store: Store, llm: LLM, body: schemas.CleanupRequest
+    store: Store, llm: LLM, config: Conf, body: schemas.CleanupRequest
 ) -> schemas.OperationResponse:
     try:
         result = cleanup_note(store, llm, body.path)
@@ -204,12 +209,13 @@ def cleanup(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if git_enabled(config):
+        stage_file(config, result.path)
     return schemas.OperationResponse(path=result.path, content=result.content)
 
 
 @router.post("/operations/inference", response_model=schemas.InferenceResponse)
 def run_inference(
-    request: Request,
     store: Store,
     llm: LLM,
     body: schemas.InferenceRequest
