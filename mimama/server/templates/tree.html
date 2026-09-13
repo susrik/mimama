@@ -1,6 +1,11 @@
 <div class="card bg-base-100 shadow">
   <div class="card-body">
     <h2 class="card-title">/{{ path }}</h2>
+    
+    <div class="flex gap-2 mb-4">
+      <button class="btn btn-sm btn-outline" hx-get="/gui/note/create?path={{ path }}" hx-target="#main">New File</button>
+    </div>
+    
     <ul class="menu">
       {% if parent is not none %}
       <li><a hx-get="/gui/tree?path={{ parent | urlencode }}" hx-target="#main">⬆︎ ..</a></li>
@@ -12,7 +17,18 @@
           📁 {{ entry.name }}{% if entry.has_context %} <span class="badge badge-sm">context</span>{% endif %}
         </a>
         {% else %}
-        <a hx-get="/gui/note?path={{ entry.path | urlencode }}" hx-target="#main">📄 {{ entry.name }}</a>
+        <div class="flex justify-between items-center">
+          <a hx-get="/gui/note?path={{ entry.path | urlencode }}" hx-target="#main">📄 {{ entry.name }}</a>
+          <div class="flex gap-1">
+            <button class="btn btn-xs btn-outline" 
+                    hx-get="/gui/note/rename?old_path={{ entry.path | urlencode }}&new_path={{ entry.path | urlencode }}" 
+                    hx-target="#main">Rename</button>
+            <button class="btn btn-xs btn-outline btn-error"
+                    hx-post="/gui/note/delete?path={{ entry.path | urlencode }}" 
+                    hx-target="#main" 
+                    hx-confirm="Delete {{ entry.name }}?">Delete</button>
+          </div>
+        </div>
         {% endif %}
       </li>
       {% endfor %}

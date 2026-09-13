@@ -1,0 +1,32 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">Transcribe audio to text</h2>
+    <form hx-post="/gui/transcribe" hx-target="#main" class="space-y-4" enctype="multipart/form-data">
+      <label class="form-control">
+        <span class="label-text">Audio file (m4a or wav)</span>
+        <input type="file" name="audio_file" accept=".m4a,.wav" class="file-input file-input-bordered" required>
+      </label>
+      
+      <label class="form-control">
+        <span class="label-text">Whisper model path (optional)</span>
+        <input type="text" name="model_path" class="input input-bordered" placeholder="~/bin/whisper-models/ggml-large-v3-turbo.bin">
+      </label>
+      
+      <button type="submit" class="btn btn-primary">Transcribe</button>
+    </form>
+    
+    <div id="transcription-result" class="mt-4"></div>
+  </div>
+</div>
+
+<script>
+// Handle the transcription result
+document.addEventListener('htmx:afterRequest', function(evt) {
+  if (evt.detail.xhr.status === 200) {
+    // Show the transcription result
+    const resultDiv = document.getElementById('transcription-result');
+    resultDiv.innerHTML = '<h3 class="card-title">Transcription Result</h3><textarea class="textarea textarea-bordered" rows="10" readonly>' + 
+      evt.detail.xhr.response + '</textarea>';
+  }
+});
+</script>

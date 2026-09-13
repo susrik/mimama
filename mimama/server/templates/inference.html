@@ -1,0 +1,20 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">AI Processing for {{ path }}</h2>
+    
+    {% if context %}
+    <details class="collapse collapse-arrow bg-base-200 mb-4">
+      <summary class="collapse-title text-sm">Context used (AGENTS.md chain)</summary>
+      <div class="collapse-content"><pre class="whitespace-pre-wrap text-xs">{{ context }}</pre></div>
+    </details>
+    {% endif %}
+    
+    <form hx-post="/gui/note/inference" hx-target="#main" class="space-y-2">
+      <label class="form-control">
+        <span class="label-text">Prompt</span>
+        <textarea name="prompt" rows="5" class="textarea textarea-bordered" required></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Run Inference</button>
+    </form>
+  </div>
+</div>

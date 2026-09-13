@@ -1,0 +1,16 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">Create New Note</h2>
+    <form hx-post="/gui/note/create" hx-target="#main" class="space-y-2">
+      <label class="form-control">
+        <span class="label-text">File path</span>
+        <input type="text" name="path" value="{{ path }}" class="input input-bordered" required>
+      </label>
+      <label class="form-control">
+        <span class="label-text">Content (optional)</span>
+        <textarea name="content" rows="10" class="textarea textarea-bordered"></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">Create</button>
+    </form>
+  </div>
+</div>

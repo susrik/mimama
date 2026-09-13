@@ -48,6 +48,42 @@ class NoteWriteResponse(BaseModel):
     path: str
 
 
+class NoteDeleteRequest(BaseModel):
+    path: str
+
+
+class NoteDeleteResponse(BaseModel):
+    path: str
+
+
+class NoteRenameRequest(BaseModel):
+    old_path: str
+    new_path: str
+
+
+class NoteRenameResponse(BaseModel):
+    old_path: str
+    new_path: str
+
+
+class NoteCreateRequest(BaseModel):
+    path: str
+    content: str | None = None
+
+
+class NoteCreateResponse(BaseModel):
+    path: str
+
+
+class TranscriptionRequest(BaseModel):
+    audio_file: str
+    model_path: str | None = None
+
+
+class TranscriptionResponse(BaseModel):
+    transcript: str
+
+
 class ContextResponse(BaseModel):
     path: str
     context: str
@@ -87,6 +123,15 @@ class CleanupRequest(BaseModel):
 
 class OperationResponse(BaseModel):
     path: str
+    content: str
+
+
+class InferenceRequest(BaseModel):
+    path: str
+    prompt: str
+
+
+class InferenceResponse(BaseModel):
     content: str
 
 

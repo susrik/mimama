@@ -18,6 +18,38 @@ DEFAULT_CONFIG_FILENAME = "mimama.json"
 CONFIG_ENV_VAR = "MIMAMA_CONFIG_FILENAME"
 
 
+class TranscriptsConfig(BaseModel):
+    """Configuration for audio transcription tools."""
+
+    ffmpeg: str = "ffmpeg"
+    """Path to ffmpeg executable. Default is just 'ffmpeg' to let shell find it."""
+
+    whisper: WhisperConfig = Field(default_factory=lambda: WhisperConfig(cli="whisper-cli"))
+
+
+class WhisperConfig(BaseModel):
+    """Configuration for whisper-cli tool."""
+
+    cli: str = "whisper-cli"
+    """Path to whisper-cli executable. Default is just 'whisper-cli' to let shell find it."""
+
+    model: str | None = None
+    """Path to the whisper model file (e.g. ~/bin/whisper-models/ggml-large-v3-turbo.bin)."""
+
+
+class NotesConfig(BaseModel):
+    """Configuration for notes storage."""
+
+    root: Path
+    """Path to the notes root directory."""
+
+    git: bool = False
+    """Enable git integration for automatic staging of changes."""
+
+    git_exe: str = "git"
+    """Path to git executable. Default is just 'git' to let shell find it."""
+
+
 class LLMConfig(BaseModel):
     """Any OpenAI-protocol endpoint (e.g. a litellm server)."""
 
@@ -62,7 +94,7 @@ class QueryConfig(BaseModel):
 
 
 class Config(BaseModel):
-    notes_root: Path
+    notes: NotesConfig
     llm: LLMConfig
     server: ServerConfig = Field(default_factory=ServerConfig)
     user: UserConfig = Field(default_factory=UserConfig)

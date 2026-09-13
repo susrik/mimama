@@ -1,5 +1,7 @@
 {
-  "notes_root": "/data/notes",
+  "notes": {
+    "root": "/data/notes"
+  },
   "llm": {
     "base_url": "http://litellm.example:4000/v1",
     "api_key": "sk-REPLACE-ME",

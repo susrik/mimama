@@ -13,10 +13,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from mimama.config import Config
 from mimama.core.context import assemble_context
+from mimama.core.git_ops import git_enabled, stage_file
 from mimama.core.llm import LLMError, SupportsComplete
 from mimama.core.notes import NoteError, NoteStore
 from mimama.core.operations import cleanup_note, transcript_to_minutes
 from mimama.core.query import QueryError, run_query
+from mimama.core.transcribe import run_transcription_pipeline
 from mimama.server import schemas
 
 router = APIRouter(prefix="/api")
@@ -74,12 +76,84 @@ def read_note(store: Store, path: str) -> schemas.NoteContent:
 
 
 @router.put("/note", response_model=schemas.NoteWriteResponse)
-def write_note(store: Store, body: schemas.NoteWriteRequest) -> schemas.NoteWriteResponse:
+def write_note(store: Store, body: schemas.NoteWriteRequest, request: Request) -> schemas.NoteWriteResponse:
     try:
         written = store.write(body.path, body.content)
     except NoteError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # If git is enabled, stage the file
+    config = get_config(request)
+    if git_enabled(config):
+        stage_file(config, body.path)
     return schemas.NoteWriteResponse(path=written)
+
+
+@router.delete("/note", response_model=schemas.NoteDeleteResponse)
+def delete_note(store: Store, body: schemas.NoteDeleteRequest) -> schemas.NoteDeleteResponse:
+    try:
+        path = store.resolve(body.path)
+        if not path.is_file():
+            raise NoteError(f"no such note: {body.path!r}")
+        path.unlink()
+    except NoteError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    # If git is enabled, stage the deletion
+    config = get_config(request)
+    if git_enabled(config):
+        stage_file(config, body.path)
+    return schemas.NoteDeleteResponse(path=body.path)
+
+
+@router.post("/note/rename", response_model=schemas.NoteRenameResponse)
+def rename_note(store: Store, body: schemas.NoteRenameRequest) -> schemas.NoteRenameResponse:
+    try:
+        old_path = store.resolve(body.old_path)
+        if not old_path.is_file():
+            raise NoteError(f"no such note: {body.old_path!r}")
+        new_path = store.resolve(body.new_path)
+        # Create parent directories for new path
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        old_path.rename(new_path)
+    except NoteError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # If git is enabled, stage both files
+    config = get_config(request)
+    if git_enabled(config):
+        stage_file(config, body.old_path)
+        stage_file(config, body.new_path)
+    return schemas.NoteRenameResponse(old_path=body.old_path, new_path=body.new_path)
+
+
+@router.post("/note/create", response_model=schemas.NoteCreateResponse)
+def create_note(store: Store, body: schemas.NoteCreateRequest) -> schemas.NoteCreateResponse:
+    try:
+        # Create the note with default content
+        path = store.write(body.path, body.content or "")
+    except NoteError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    # If git is enabled, stage the new file
+    config = get_config(request)
+    if git_enabled(config):
+        stage_file(config, body.path)
+    return schemas.NoteCreateResponse(path=path)
+
+
+@router.post("/transcribe", response_model=schemas.TranscriptionResponse)
+def transcribe(
+    request: Request,
+    config: Conf,
+    body: schemas.TranscriptionRequest
+) -> schemas.TranscriptionResponse:
+    try:
+        # Run the transcription pipeline
+        transcript = run_transcription_pipeline(
+            config,
+            body.audio_file,
+            body.model_path
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return schemas.TranscriptionResponse(transcript=transcript)
 
 
 @router.get("/context", response_model=schemas.ContextResponse)
@@ -131,6 +205,29 @@ def cleanup(
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return schemas.OperationResponse(path=result.path, content=result.content)
+
+
+@router.post("/operations/inference", response_model=schemas.InferenceResponse)
+def run_inference(
+    request: Request,
+    store: Store,
+    llm: LLM,
+    body: schemas.InferenceRequest
+) -> schemas.InferenceResponse:
+    try:
+        # Assemble context for the target path
+        context = assemble_context(store, body.path)
+
+        # Run inference with the context
+        result = llm.complete(
+            system=context or "You are an assistant that manages a tree of markdown meeting notes.",
+            user=body.prompt,
+        )
+    except NoteError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return schemas.InferenceResponse(content=result)
 
 
 @router.post("/query", response_model=schemas.QueryResponse)

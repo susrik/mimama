@@ -19,6 +19,7 @@ from mimama.core.llm import LLMError, SupportsComplete
 from mimama.core.notes import NoteError, NoteStore
 from mimama.core.operations import cleanup_note, transcript_to_minutes
 from mimama.core.query import QueryError, run_query
+from mimama.core.transcribe import run_transcription_pipeline
 
 router = APIRouter()
 
@@ -60,6 +61,82 @@ def tree(request: Request, path: str = "") -> HTMLResponse:
     )
 
 
+@router.get("/gui/note/create", response_class=HTMLResponse)
+def create_note_form(request: Request, path: str = "") -> HTMLResponse:
+    return templates.TemplateResponse(request, "create_note.html", {"path": path})
+
+
+@router.post("/gui/note/create", response_class=HTMLResponse)
+def create_note_submit(
+    request: Request,
+    path: Annotated[str, Form()],
+    content: Annotated[str, Form()] = "",
+) -> HTMLResponse:
+    try:
+        store = _store(request)
+        full_path = (path + "/" + "new-note.md").lstrip("/")
+        result = store.write(full_path, content or "")
+    except NoteError as exc:
+        return _error(request, str(exc))
+
+    # Redirect to the new note
+    return templates.TemplateResponse(
+        request, "note.html", {"path": full_path, "content": content or "", "context": ""}
+    )
+
+
+@router.get("/gui/note/rename", response_class=HTMLResponse)
+def rename_note_form(request: Request, old_path: str, new_path: str = "") -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "rename_note.html",
+        {"old_path": old_path, "new_path": new_path or old_path}
+    )
+
+
+@router.post("/gui/note/rename", response_class=HTMLResponse)
+def rename_note_submit(
+    request: Request,
+    old_path: Annotated[str, Form()],
+    new_path: Annotated[str, Form()],
+) -> HTMLResponse:
+    try:
+        store = _store(request)
+        old_path_obj = store.resolve(old_path)
+        if not old_path_obj.is_file():
+            raise NoteError(f"no such note: {old_path!r}")
+
+        new_path_obj = store.resolve(new_path)
+        # Create parent directories for new path
+        new_path_obj.parent.mkdir(parents=True, exist_ok=True)
+        old_path_obj.rename(new_path_obj)
+    except NoteError as exc:
+        return _error(request, str(exc))
+
+    # Redirect to the renamed note
+    return templates.TemplateResponse(
+        request, "note.html", {"path": new_path, "content": store.read(new_path), "context": ""}
+    )
+
+
+@router.post("/gui/note/delete", response_class=HTMLResponse)
+def delete_note_submit(request: Request, path: Annotated[str, Form()]) -> HTMLResponse:
+    try:
+        store = _store(request)
+        path_obj = store.resolve(path)
+        if not path_obj.is_file():
+            raise NoteError(f"no such note: {path!r}")
+        path_obj.unlink()
+    except NoteError as exc:
+        return _error(request, str(exc))
+
+    # Redirect to parent directory
+    parent = "/".join(path.split("/")[:-1]) if path else ""
+    return templates.TemplateResponse(
+        request, "tree.html", {"path": parent, "parent": None, "entries": store.list_dir(parent)}
+    )
+
+
 @router.get("/gui/note", response_class=HTMLResponse)
 def note(request: Request, path: str) -> HTMLResponse:
     store = _store(request)
@@ -79,6 +156,33 @@ def note(request: Request, path: str) -> HTMLResponse:
 def convert_form(request: Request) -> HTMLResponse:
     folders = _store(request).list_folders()
     return templates.TemplateResponse(request, "convert.html", {"folders": folders})
+
+
+@router.post("/gui/transcribe", response_class=HTMLResponse)
+def transcribe_submit(
+    request: Request,
+    audio_file: Annotated[str, Form()],
+    model_path: Annotated[str | None, Form()] = None,
+) -> HTMLResponse:
+    try:
+        # For now, we'll just handle the file upload in a basic way
+        # In a real implementation, you'd want to handle file uploads properly
+        result = run_transcription_pipeline(
+            _config(request),
+            audio_file,
+            model_path,
+        )
+    except (NoteError, LLMError) as exc:
+        return _error(request, str(exc))
+
+    return templates.TemplateResponse(
+        request, "transcription_result.html", {"transcript": result}
+    )
+
+
+@router.get("/gui/transcribe-form", response_class=HTMLResponse)
+def transcribe_form(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "transcribe.html")
 
 
 @router.post("/gui/convert", response_class=HTMLResponse)
@@ -111,6 +215,33 @@ def cleanup_submit(request: Request, path: Annotated[str, Form()]) -> HTMLRespon
         return _error(request, str(exc))
     return templates.TemplateResponse(
         request, "result.html", {"path": result.path, "content": result.content}
+    )
+
+
+@router.get("/gui/note/inference", response_class=HTMLResponse)
+def inference_form(request: Request, path: str) -> HTMLResponse:
+    context = assemble_context(_store(request), path)
+    return templates.TemplateResponse(
+        request, "inference.html", {"path": path, "context": context}
+    )
+
+
+@router.post("/gui/note/inference", response_class=HTMLResponse)
+def inference_submit(
+    request: Request,
+    path: Annotated[str, Form()],
+    prompt: Annotated[str, Form()],
+) -> HTMLResponse:
+    try:
+        result = _llm(request).complete(
+            system=assemble_context(_store(request), path) or "You are an assistant that manages a tree of markdown meeting notes.",
+            user=prompt,
+        )
+    except (NoteError, LLMError) as exc:
+        return _error(request, str(exc))
+
+    return templates.TemplateResponse(
+        request, "inference_result.html", {"path": path, "prompt": prompt, "content": result}
     )
 
 

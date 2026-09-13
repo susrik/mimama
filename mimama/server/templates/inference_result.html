@@ -1,0 +1,20 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">AI Processing Result</h2>
+    
+    <div class="mb-4">
+      <strong>Prompt:</strong>
+      <pre class="whitespace-pre-wrap text-sm bg-base-200 p-2 rounded">{{ prompt }}</pre>
+    </div>
+    
+    <div class="mb-4">
+      <strong>Result:</strong>
+      <pre class="whitespace-pre-wrap text-sm bg-base-200 p-2 rounded">{{ content }}</pre>
+    </div>
+    
+    <div class="card-actions justify-end">
+      <button class="btn btn-primary" onclick="navigator.clipboard.writeText('{{ content }}')">Copy to Clipboard</button>
+      <a href="/gui/note?path={{ path }}" class="btn btn-outline">Back to Note</a>
+    </div>
+  </div>
+</div>

@@ -226,3 +226,70 @@ def context(ctx: click.Context, path: str) -> None:
     except APIError as exc:
         _fail(exc)
     click.echo(response.context or "(no context files on this path)")
+
+
+@cli.command()
+@click.option("--path", required=True, help="Path to the file to create")
+@click.option("--content", default="", help="Initial content for the file")
+@click.pass_context
+def create(ctx: click.Context, path: str, content: str) -> None:
+    """Create a new note file."""
+    try:
+        result = _api(ctx).create_note(path=path, content=content)
+        click.echo(f"Created: {result.path}")
+    except APIError as exc:
+        _fail(exc)
+
+
+@cli.command()
+@click.option("--old-path", required=True, help="Current path of the file")
+@click.option("--new-path", required=True, help="New path for the file")
+@click.pass_context
+def rename(ctx: click.Context, old_path: str, new_path: str) -> None:
+    """Rename a note file."""
+    try:
+        result = _api(ctx).rename_note(old_path=old_path, new_path=new_path)
+        click.echo(f"Renamed: {result.old_path} → {result.new_path}")
+    except APIError as exc:
+        _fail(exc)
+
+
+@cli.command()
+@click.option("--path", required=True, help="Path to the file to delete")
+@click.pass_context
+def delete(ctx: click.Context, path: str) -> None:
+    """Delete a note file."""
+    try:
+        result = _api(ctx).delete_note(path=path)
+        click.echo(f"Deleted: {result.path}")
+    except APIError as exc:
+        _fail(exc)
+
+
+@cli.command()
+@click.option("--path", required=True, help="Path to the file for inference")
+@click.option("--prompt", required=True, help="Prompt for the LLM")
+@click.pass_context
+def inference(ctx: click.Context, path: str, prompt: str) -> None:
+    """Run AI inference on a note with context."""
+    try:
+        result = _api(ctx).run_inference(path=path, prompt=prompt)
+        click.echo(result.content)
+    except APIError as exc:
+        _fail(exc)
+
+
+@cli.command()
+@click.option("--audio-file", required=True, help="Path to audio file (.m4a or .wav)")
+@click.option("--model-path", default=None, help="Path to whisper model file")
+@click.pass_context
+def transcribe(ctx: click.Context, audio_file: str, model_path: str | None) -> None:
+    """Transcribe an audio file to text."""
+    try:
+        response = _api(ctx).transcribe(
+            audio_file=audio_file,
+            model_path=model_path
+        )
+        click.echo(response.transcript)
+    except APIError as exc:
+        _fail(exc)
