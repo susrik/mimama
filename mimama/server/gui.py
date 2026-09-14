@@ -1,6 +1,6 @@
 """/gui (+ /) — GUI-internal htmx surface. HTML in, HTML out (except the small
-JSON job-id response from the transcription upload endpoint, consumed by a
-few lines of inline JS, and the SSE console stream).
+JSON job-id response from the transcription/inference upload/start endpoints,
+consumed by a few lines of inline JS, and the SSE console streams).
 
 These endpoints serve pages and fragments for the web UI and are free to
 change with it; external clients must use /api instead.
@@ -20,6 +20,8 @@ from fastapi.templating import Jinja2Templates
 from mimama.config import Config
 from mimama.core.context import assemble_context, list_context_files
 from mimama.core.git_ops import git_enabled, stage_file
+from mimama.core.inference_jobs import DONE as JOB_DONE
+from mimama.core.inference_jobs import InferenceJob, InferenceJobRegistry
 from mimama.core.llm import LLMError, SupportsComplete
 from mimama.core.naming import default_note_filename
 from mimama.core.notes import NoteError, NoteStore
@@ -29,7 +31,7 @@ from mimama.core.operations import (
     generate_note_content,
     transcript_to_minutes,
 )
-from mimama.core.query import QueryError, run_query
+from mimama.core.query import run_query
 from mimama.core.transcribe import DONE, TranscriptionJobRegistry
 
 router = APIRouter()
@@ -57,11 +59,37 @@ def _jobs(request: Request) -> TranscriptionJobRegistry:
     return registry
 
 
+def _inference_jobs(request: Request) -> InferenceJobRegistry:
+    registry: InferenceJobRegistry = request.app.state.inference_jobs
+    return registry
+
+
+def _render(name: str, context: dict[str, object]) -> str:
+    """Render a template fragment to a string (for embedding in a JSON SSE payload)."""
+    return templates.get_template(name).render(context)
+
+
 def _maybe_stage(config: Config, *paths: str) -> None:
     """Stage the given note paths if git integration is enabled."""
     if git_enabled(config):
         for path in paths:
             stage_file(config, path)
+
+
+def _job_events(registry: InferenceJobRegistry, job_id: str, unknown_message: str) -> Iterator[str]:
+    """Shared SSE loop for all inference-job stream endpoints."""
+    job = registry.get(job_id)
+    if job is None:
+        yield f"event: done\ndata: {json.dumps({'error': unknown_message})}\n\n"
+        return
+    while True:
+        chunk = job.lines.get()
+        if chunk is JOB_DONE:
+            payload = {"html": job.html, "error": job.error, "cancelled": job.cancelled}
+            yield f"event: done\ndata: {json.dumps(payload)}\n\n"
+            registry.discard(job_id)
+            return
+        yield f"data: {json.dumps(str(chunk))}\n\n"
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -127,9 +155,6 @@ def create_note_submit(
                 instructions=transcript_instructions or None,
             )
             path, written_content = result.path, result.content
-        elif ai:
-            written_content = generate_note_content(store, _llm(request), target, context, content)
-            path = store.write(target, written_content)
         else:
             written_content = content
             path = store.write(target, written_content)
@@ -140,6 +165,50 @@ def create_note_submit(
     return templates.TemplateResponse(
         request, "result.html", {"path": path, "content": written_content}
     )
+
+
+@router.post("/gui/note/create/generate/start")
+def generate_start(
+    request: Request,
+    folder: Annotated[str, Form()] = "",
+    filename: Annotated[str, Form()] = "",
+    content: Annotated[str, Form()] = "",
+    context: Annotated[str, Form()] = "",
+) -> dict[str, str]:
+    """Start a background, streamed free-form AI generation for the "new
+    file" flow. On success the job writes the note itself and its ``html``
+    is a rendered ``result.html`` fragment, ready to swap into ``#main``."""
+    store = _store(request)
+    config = _config(request)
+    llm = _llm(request)
+    resolved_filename = filename or default_note_filename()
+    target = (PurePosixPath(folder) / resolved_filename).as_posix()
+
+    def work(job: InferenceJob) -> None:
+        written_content = generate_note_content(
+            store, llm, target, context, content, on_chunk=job.emit, cancel_event=job.cancel_event
+        )
+        path = store.write(target, written_content)
+        _maybe_stage(config, path)
+        job.html = _render("result.html", {"path": path, "content": written_content})
+
+    job = _inference_jobs(request).create(work)
+    return {"job_id": job.id}
+
+
+@router.get("/gui/note/create/generate/stream/{job_id}")
+def generate_stream(request: Request, job_id: str) -> StreamingResponse:
+    registry = _inference_jobs(request)
+    return StreamingResponse(
+        _job_events(registry, job_id, "unknown generation job"),
+        media_type="text/event-stream",
+    )
+
+
+@router.post("/gui/note/create/generate/cancel/{job_id}")
+def generate_cancel(request: Request, job_id: str) -> dict[str, bool]:
+    _inference_jobs(request).cancel(job_id)
+    return {"ok": True}
 
 
 @router.post("/gui/transcribe/start")
@@ -262,38 +331,80 @@ def inference_form(request: Request, path: str) -> HTMLResponse:
     )
 
 
-@router.post("/gui/note/inference", response_class=HTMLResponse)
-def inference_submit(
+@router.post("/gui/note/inference/start")
+def inference_start(
     request: Request,
     path: Annotated[str, Form()],
     prompt: Annotated[str, Form()],
-) -> HTMLResponse:
-    try:
-        result = _llm(request).complete(
-            system=assemble_context(_store(request), path)
-            or "You are an assistant that manages a tree of markdown meeting notes.",
-            user=prompt,
-        )
-    except (NoteError, LLMError) as exc:
-        return _error(request, str(exc))
+) -> dict[str, str]:
+    store = _store(request)
+    llm = _llm(request)
 
-    return templates.TemplateResponse(
-        request, "inference_result.html", {"path": path, "prompt": prompt, "content": result}
+    def work(job: InferenceJob) -> None:
+        system = assemble_context(store, path) or (
+            "You are an assistant that manages a tree of markdown meeting notes."
+        )
+        content = llm.stream_complete(
+            system=system, user=prompt, on_chunk=job.emit, cancel_event=job.cancel_event
+        )
+        job.html = _render(
+            "inference_result.html", {"path": path, "prompt": prompt, "content": content}
+        )
+
+    job = _inference_jobs(request).create(work)
+    return {"job_id": job.id}
+
+
+@router.get("/gui/note/inference/stream/{job_id}")
+def inference_stream(request: Request, job_id: str) -> StreamingResponse:
+    registry = _inference_jobs(request)
+    return StreamingResponse(
+        _job_events(registry, job_id, "unknown inference job"),
+        media_type="text/event-stream",
     )
 
 
-@router.post("/gui/query", response_class=HTMLResponse)
-def query_submit(request: Request, question: Annotated[str, Form()]) -> HTMLResponse:
+@router.post("/gui/note/inference/cancel/{job_id}")
+def inference_cancel(request: Request, job_id: str) -> dict[str, bool]:
+    _inference_jobs(request).cancel(job_id)
+    return {"ok": True}
+
+
+@router.post("/gui/query/start")
+def query_start(request: Request, question: Annotated[str, Form()]) -> dict[str, str]:
+    store = _store(request)
+    llm = _llm(request)
     config = _config(request)
-    try:
+
+    def work(job: InferenceJob) -> None:
         _, results = run_query(
-            _store(request), _llm(request), question, config.user, config.query
+            store,
+            llm,
+            question,
+            config.user,
+            config.query,
+            on_chunk=job.emit,
+            cancel_event=job.cancel_event,
         )
-    except (QueryError, LLMError) as exc:
-        return _error(request, str(exc))
-    return templates.TemplateResponse(
-        request, "query_results.html", {"question": question, "results": results}
+        job.html = _render("query_results.html", {"question": question, "results": results})
+
+    job = _inference_jobs(request).create(work)
+    return {"job_id": job.id}
+
+
+@router.get("/gui/query/stream/{job_id}")
+def query_stream(request: Request, job_id: str) -> StreamingResponse:
+    registry = _inference_jobs(request)
+    return StreamingResponse(
+        _job_events(registry, job_id, "unknown query job"),
+        media_type="text/event-stream",
     )
+
+
+@router.post("/gui/query/cancel/{job_id}")
+def query_cancel(request: Request, job_id: str) -> dict[str, bool]:
+    _inference_jobs(request).cancel(job_id)
+    return {"ok": True}
 
 
 def _error(request: Request, message: str) -> HTMLResponse:

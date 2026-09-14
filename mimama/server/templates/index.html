@@ -15,13 +15,109 @@
   </div>
 
   <div class="p-4 max-w-4xl mx-auto space-y-4">
-    <form hx-post="/gui/query" hx-target="#main" class="flex gap-2">
+    <form id="query-form" class="flex gap-2">
       <input type="text" name="question" placeholder="Ask about your notes…"
              class="input input-bordered flex-1" required>
-      <button type="submit" class="btn btn-primary">Query</button>
+      <button type="button" id="query-submit-button" class="btn btn-primary">Query</button>
     </form>
 
     <div id="main" hx-get="/gui/tree" hx-trigger="load"></div>
   </div>
+
+  <dialog id="query-modal" class="modal">
+    <div class="modal-box">
+      <h3 class="font-bold text-lg">Querying…</h3>
+      <pre id="query-console"
+           class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+      <div class="modal-action">
+        <button type="button" id="query-stop-button" class="btn btn-error btn-sm" disabled>Stop</button>
+        <button type="button" id="query-close-button" class="btn btn-sm hidden"
+                onclick="document.getElementById('query-modal').close()">Close</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    window.mimama = window.mimama || {};
+
+    // Replace #main's content with a server-rendered fragment and let htmx
+    // wire up any hx-* attributes in it (used when a fragment is injected
+    // outside of htmx's own request/swap cycle, e.g. after a streamed job).
+    mimama.swapMain = function (html) {
+      const main = document.getElementById("main");
+      main.innerHTML = html;
+      if (window.htmx) htmx.process(main);
+    };
+
+    // Runs a background LLM job (start → SSE console stream → done) behind a
+    // modal with a live console and a Stop button. On success the modal
+    // closes itself and `onDone` receives the job's rendered result HTML; on
+    // cancellation the modal just closes; on error the console shows the
+    // error and a Close button appears so the user isn't left stuck.
+    mimama.runInferenceJob = async function ({
+      startUrl, streamUrlBase, cancelUrlBase, formData,
+      modalId, consoleId, stopButtonId, closeButtonId, onDone,
+    }) {
+      const modal = document.getElementById(modalId);
+      const consoleEl = document.getElementById(consoleId);
+      const stopButton = document.getElementById(stopButtonId);
+      const closeButton = closeButtonId ? document.getElementById(closeButtonId) : null;
+
+      consoleEl.textContent = "";
+      stopButton.disabled = true;
+      stopButton.onclick = null;
+      if (closeButton) closeButton.classList.add("hidden");
+      modal.showModal();
+
+      const response = await fetch(startUrl, { method: "POST", body: formData });
+      const { job_id } = await response.json();
+      const source = new EventSource(`${streamUrlBase}/${job_id}`);
+
+      stopButton.disabled = false;
+      stopButton.onclick = () => {
+        fetch(`${cancelUrlBase}/${job_id}`, { method: "POST" });
+        stopButton.disabled = true;
+        source.close();
+        modal.close();
+      };
+
+      source.onmessage = (event) => {
+        consoleEl.textContent += JSON.parse(event.data);
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      };
+      source.addEventListener("done", (event) => {
+        const payload = JSON.parse(event.data);
+        source.close();
+        stopButton.disabled = true;
+        if (payload.cancelled) {
+          modal.close();
+          return;
+        }
+        if (payload.error) {
+          consoleEl.textContent += "\nERROR: " + payload.error + "\n";
+          if (closeButton) closeButton.classList.remove("hidden");
+          return;
+        }
+        modal.close();
+        onDone(payload.html);
+      });
+    };
+
+    document.getElementById("query-submit-button").addEventListener("click", () => {
+      const form = document.getElementById("query-form");
+      if (!form.reportValidity()) return;
+      mimama.runInferenceJob({
+        startUrl: "/gui/query/start",
+        streamUrlBase: "/gui/query/stream",
+        cancelUrlBase: "/gui/query/cancel",
+        formData: new FormData(form),
+        modalId: "query-modal",
+        consoleId: "query-console",
+        stopButtonId: "query-stop-button",
+        closeButtonId: "query-close-button",
+        onDone: mimama.swapMain,
+      });
+    });
+  </script>
 </body>
 </html>

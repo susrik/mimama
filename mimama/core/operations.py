@@ -6,6 +6,8 @@ and pass it to the LLM as system context.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePosixPath
@@ -13,6 +15,10 @@ from pathlib import PurePosixPath
 from mimama.core.context import assemble_context
 from mimama.core.llm import SupportsComplete
 from mimama.core.notes import NoteStore
+
+
+def _noop(_chunk: str) -> None:
+    return None
 
 _BASE_SYSTEM = """\
 You are an assistant that manages a tree of markdown meeting notes.
@@ -77,15 +83,21 @@ def generate_note_content(
     path: str,
     context: str,
     content: str,
+    on_chunk: Callable[[str], None] = _noop,
+    cancel_event: threading.Event | None = None,
 ) -> str:
     """Run a free-form AI generation for the "new file" flow.
 
     ``context`` and ``content`` (the user-supplied "context" and "content"
     fields from the new-file dialog) become the prompt; ``path``'s folder
-    supplies the hierarchical AGENTS.md system context.
+    supplies the hierarchical AGENTS.md system context. ``on_chunk``/
+    ``cancel_event`` let callers stream the response and cancel mid-flight
+    (see ``mimama.core.llm.LLMClient.stream_complete``).
     """
     user = f"{context}\n\n{content}".strip() if context else content
-    return llm.complete(system=_system_prompt(store, path), user=user)
+    return llm.stream_complete(
+        system=_system_prompt(store, path), user=user, on_chunk=on_chunk, cancel_event=cancel_event
+    )
 
 
 def cleanup_note(

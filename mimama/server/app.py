@@ -13,6 +13,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from fastapi import FastAPI
 
 from mimama.config import Config, load_config
+from mimama.core.inference_jobs import InferenceJobRegistry
 from mimama.core.llm import LLMClient, SupportsComplete
 from mimama.core.notes import NoteStore
 from mimama.core.transcribe import TranscriptionJobRegistry
@@ -51,6 +52,7 @@ def create_app(
     app.state.store = store
     app.state.llm = llm
     app.state.transcription_jobs = TranscriptionJobRegistry()
+    app.state.inference_jobs = InferenceJobRegistry()
 
     app.include_router(api_router)
     app.include_router(gui_router)

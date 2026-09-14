@@ -7,6 +7,8 @@ tests can inject a fake.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from openai import OpenAI
@@ -18,10 +20,26 @@ class LLMError(Exception):
     """The LLM endpoint failed or returned an unusable response."""
 
 
+class LLMCancelled(LLMError):
+    """A streaming completion was cancelled (its ``cancel_event`` was set)."""
+
+
+def _noop(_chunk: str) -> None:
+    return None
+
+
 class SupportsComplete(Protocol):
     """What the rest of the codebase needs from an LLM client (fakeable)."""
 
     def complete(self, system: str, user: str) -> str: ...
+
+    def stream_complete(
+        self,
+        system: str,
+        user: str,
+        on_chunk: Callable[[str], None] = _noop,
+        cancel_event: threading.Event | None = None,
+    ) -> str: ...
 
 
 class LLMClient:
@@ -36,16 +54,43 @@ class LLMClient:
 
     def complete(self, system: str, user: str) -> str:
         """One chat completion; returns the assistant message text."""
-        response = self._client.chat.completions.create(
+        return self.stream_complete(system, user)
+
+    def stream_complete(
+        self,
+        system: str,
+        user: str,
+        on_chunk: Callable[[str], None] = _noop,
+        cancel_event: threading.Event | None = None,
+    ) -> str:
+        """One chat completion, streamed.
+
+        ``on_chunk`` is called with each incremental piece of text as it
+        arrives; the full assistant message text is returned at the end.
+        If ``cancel_event`` is set at any point, the upstream connection is
+        closed immediately and :class:`LLMCancelled` is raised.
+        """
+        stream = self._client.chat.completions.create(
             model=self._model,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
+            stream=True,
         )
-        if not response.choices:
-            raise LLMError("LLM returned no choices")
-        content = response.choices[0].message.content
-        if content is None:
+        parts: list[str] = []
+        try:
+            for chunk in stream:
+                if cancel_event is not None and cancel_event.is_set():
+                    raise LLMCancelled("cancelled")
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    parts.append(delta)
+                    on_chunk(delta)
+        finally:
+            stream.close()
+        if not parts:
             raise LLMError("LLM returned empty content")
-        return content
+        return "".join(parts)

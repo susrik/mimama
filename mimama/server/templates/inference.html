@@ -9,12 +9,44 @@
     </details>
     {% endif %}
     
-    <form hx-post="/gui/note/inference" hx-target="#main" class="space-y-2">
+    <form id="inference-form" class="space-y-2">
+      <input type="hidden" name="path" value="{{ path }}">
       <label class="form-control">
         <span class="label-text">Prompt</span>
         <textarea name="prompt" rows="5" class="textarea textarea-bordered" required></textarea>
       </label>
-      <button type="submit" class="btn btn-primary">Run Inference</button>
+      <button type="button" id="inference-submit-button" class="btn btn-primary">Run Inference</button>
     </form>
   </div>
 </div>
+
+<dialog id="inference-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Running inference…</h3>
+    <pre id="inference-console"
+         class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+    <div class="modal-action">
+      <button type="button" id="inference-stop-button" class="btn btn-error btn-sm" disabled>Stop</button>
+      <button type="button" id="inference-close-button" class="btn btn-sm hidden"
+              onclick="document.getElementById('inference-modal').close()">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  document.getElementById("inference-submit-button").addEventListener("click", () => {
+    const form = document.getElementById("inference-form");
+    if (!form.reportValidity()) return;
+    mimama.runInferenceJob({
+      startUrl: "/gui/note/inference/start",
+      streamUrlBase: "/gui/note/inference/stream",
+      cancelUrlBase: "/gui/note/inference/cancel",
+      formData: new FormData(form),
+      modalId: "inference-modal",
+      consoleId: "inference-console",
+      stopButtonId: "inference-stop-button",
+      closeButtonId: "inference-close-button",
+      onDone: mimama.swapMain,
+    });
+  });
+</script>

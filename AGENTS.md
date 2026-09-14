@@ -29,9 +29,22 @@ and `/gui`) is staged (never committed) via `mimama/core/git_ops.py`.
 - `mimama/core/naming.py` — `default_note_filename()`: dated, Heroku-style
   default filename (`YYYY-MM-DD-adjective-noun.md`) for the "new file" GUI flow.
 - `mimama/core/llm.py` — `LLMClient` wrapping the openai SDK against any
-  OpenAI-protocol endpoint (base_url + api_key, e.g. litellm).
+  OpenAI-protocol endpoint (base_url + api_key, e.g. litellm). `complete()` is
+  a thin wrapper over the real implementation, `stream_complete()`, which
+  streams the response (`stream=True`) chunk-by-chunk to an `on_chunk`
+  callback and supports cooperative cancellation via a `threading.Event`
+  (raises `LLMCancelled` and closes the upstream connection).
 - `mimama/core/operations.py` — transcript→minutes, notes cleanup, and
   free-form AI generation (`generate_note_content`) for the "new file" flow.
+  `generate_note_content` takes optional `on_chunk`/`cancel_event` for the
+  GUI's streamed generation job.
+- `mimama/core/inference_jobs.py` — generic background-thread job
+  (`InferenceJob`/`InferenceJobRegistry`) backing the `/gui` streamed-LLM
+  flows (new-file AI generation, ad-hoc inference, natural-language query):
+  the caller supplies a `work` closure that streams text via `job.emit`
+  (consumed over SSE) and sets `job.html` to the final rendered fragment;
+  cancellation (`job.cancel_event`) is cooperative, same mechanism as
+  `LLMClient.stream_complete`.
 - `mimama/core/git_ops.py` — the single seam that hides *how* git is invoked
   (shell `git` today; a future swap to a Python git library only touches this
   module). `stage_file`/`stage_files` run in `notes.root`; no-ops when
@@ -46,19 +59,24 @@ and `/gui`) is staged (never committed) via `mimama/core/git_ops.py`.
   semantic question); (2) mechanical prefilter (dates: frontmatter →
   ISO-in-filename → mtime; keyword grep); (3) optional LLM semantic rerank of
   capped excerpts. Token cost is bounded by `query.max_candidates` /
-  `query.excerpt_chars` config.
+  `query.excerpt_chars` config. `plan_query`/`rerank`/`run_query` take
+  optional `on_chunk`/`cancel_event`, threaded to `LLMClient.stream_complete`.
 - `mimama/server/` — `app.py` (factory: mounts routers, conditionally mounts
-  MCP, starts enabled listeners; owns the `TranscriptionJobRegistry`),
-  `schemas.py`, `api.py`, `gui.py`, templates.
+  MCP, starts enabled listeners; owns the `TranscriptionJobRegistry` and
+  `InferenceJobRegistry`), `schemas.py`, `api.py`, `gui.py`, templates.
   - `/gui`'s "New file" flow (`GET`/`POST /gui/note/create`, template
     `new_note.html`) is the single entry point for creating notes: plain
-    text, free-form AI generation, or transcript→minutes conversion (with an
-    optional audio-upload sub-flow streamed over SSE from
-    `/gui/transcribe/start` + `/gui/transcribe/stream/{job_id}`). It replaces
-    what used to be three separate GUI flows ("new file", "convert
-    transcript", "transcribe audio"); `/api/operations/convert` and
-    `/api/transcribe` remain as the stable, path-based external contract for
-    the CLI/MCP/listeners.
+    text, transcript→minutes conversion (with an optional audio-upload
+    sub-flow streamed over SSE from `/gui/transcribe/start` +
+    `/gui/transcribe/stream/{job_id}`), or free-form AI generation — the
+    latter goes through `/gui/note/create/generate/{start,stream,cancel}`
+    instead, a streamed `InferenceJob` behind a console-popup modal with a
+    Stop button that writes the note itself and auto-closes on success.
+    `/gui/note/inference` and `/gui/query` follow the same
+    start/stream/cancel job pattern. `/api/operations/convert`,
+    `/api/operations/inference`, `/api/query`, and `/api/transcribe` remain
+    the stable, blocking, path-based external contract for the CLI/MCP/
+    listeners — unaffected by any of the `/gui`-only streaming/job machinery.
 - `mimama/cli/main.py` — click CLI; any missing option is prompted for with
   guided flows (numbered folder pickers fetched from /api, `click.edit()` for
   transcripts, confirm-before-send).

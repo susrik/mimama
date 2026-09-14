@@ -68,6 +68,19 @@
   </div>
 </div>
 
+<dialog id="generate-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Generating…</h3>
+    <pre id="generate-console"
+         class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+    <div class="modal-action">
+      <button type="button" id="generate-stop-button" class="btn btn-error btn-sm" disabled>Stop</button>
+      <button type="button" id="generate-close-button" class="btn btn-sm hidden"
+              onclick="document.getElementById('generate-modal').close()">Close</button>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="transcribe-modal" class="modal">
   <div class="modal-box">
     <h3 class="font-bold text-lg">Transcribe audio</h3>
@@ -99,9 +112,17 @@ window.mimama = window.mimama || {};
   const transcriptSection = document.getElementById("transcript-section");
   const submitButton = document.getElementById("submit-button");
   const contentLabel = document.getElementById("content-label");
+  const form = document.getElementById("new-note-form");
+
+  function generateOnly() {
+    return aiCheckbox.checked && !transcriptCheckbox.checked;
+  }
 
   function refreshLabels() {
     submitButton.textContent = aiCheckbox.checked ? "Run inference" : "Create";
+    // When only generating (no transcript conversion), the submit button no
+    // longer submits the form directly — it starts a streamed job instead.
+    submitButton.type = generateOnly() ? "button" : "submit";
     contentLabel.textContent = (aiCheckbox.checked && transcriptCheckbox.checked)
       ? "Content (paste the transcript here)"
       : "Content";
@@ -116,6 +137,21 @@ window.mimama = window.mimama || {};
     refreshLabels();
   });
   refreshLabels();
+
+  submitButton.addEventListener("click", () => {
+    if (!generateOnly()) return;
+    mimama.runInferenceJob({
+      startUrl: "/gui/note/create/generate/start",
+      streamUrlBase: "/gui/note/create/generate/stream",
+      cancelUrlBase: "/gui/note/create/generate/cancel",
+      formData: new FormData(form),
+      modalId: "generate-modal",
+      consoleId: "generate-console",
+      stopButtonId: "generate-stop-button",
+      closeButtonId: "generate-close-button",
+      onDone: mimama.swapMain,
+    });
+  });
 
   let selectedFile = null;
   let transcriptText = null;
