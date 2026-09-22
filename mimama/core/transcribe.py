@@ -1,4 +1,5 @@
-"""Audio transcription: ffmpeg (m4a→wav) + whisper-cli, with two entry points.
+"""Audio transcription: ffmpeg (any format → wav) + whisper-cli, with two
+entry points.
 
 - :func:`run_transcription_pipeline` — synchronous, path-based (used by the
   stable ``/api/transcribe`` JSON endpoint: CLI, MCP, and any external
@@ -8,10 +9,17 @@
   background thread, and streams each subprocess output line to a queue so
   the GUI can show real-time console output over SSE.
 
-Both run the same two external commands in a fresh temp directory:
+Both run the same two external commands in a fresh temp directory. Input
+already in ``.wav`` format is passed straight to whisper-cli; any other
+format is first handed to ffmpeg, which decodes whatever it recognizes (the
+intermediate filename is arbitrary — it lives only in the temp directory):
 
-    ffmpeg -i <file>.m4a -ar 16000 -ac 1 -c:a pcm_s16le <tmp>/<file>.wav
-    whisper-cli -mc 0 -m <model> -f <file>.wav -otxt -of <tmp>/<file>
+    ffmpeg -i <input> -ar 16000 -ac 1 -c:a pcm_s16le <tmp>/converted.wav
+    whisper-cli -mc 0 -m <model> -f <tmp>/converted.wav -otxt -of <tmp>/converted
+
+If ffmpeg can't decode the input, its stderr is surfaced as the error (via
+the raised exception for the API path, or the streamed console output for
+the GUI job) rather than us pre-validating file extensions.
 
 Note on ``-of``: whisper-cli's default output naming appends ``.txt`` to the
 *full* input filename (e.g. ``<file>.wav.txt``), not to its stem. We always
@@ -88,7 +96,7 @@ def run_transcription_pipeline(
 
     Args:
         config: Application configuration.
-        audio_file: Path to input audio file (.m4a or .wav).
+        audio_file: Path to input audio file, any format ffmpeg can decode.
         model_path: Optional override for the whisper model path.
 
     Returns:
@@ -100,20 +108,18 @@ def run_transcription_pipeline(
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_dir_path = Path(temp_dir)
-        working_audio = temp_dir_path / audio_path.name
-        shutil.copy2(audio_path, working_audio)
 
-        if working_audio.suffix.lower() == ".m4a":
-            wav_path = temp_dir_path / f"{working_audio.stem}.wav"
+        if audio_path.suffix.lower() == ".wav":
+            working_audio = temp_dir_path / audio_path.name
+            shutil.copy2(audio_path, working_audio)
+        else:
+            working_audio = temp_dir_path / "converted.wav"
             result = subprocess.run(
-                _ffmpeg_command(config, working_audio, wav_path),
+                _ffmpeg_command(config, audio_path, working_audio),
                 capture_output=True, text=True, check=False,
             )
             if result.returncode != 0:
                 raise RuntimeError(f"ffmpeg failed: {result.stderr}")
-            working_audio = wav_path
-        elif working_audio.suffix.lower() != ".wav":
-            raise RuntimeError(f"unsupported audio format: {working_audio.suffix}")
 
         result = subprocess.run(
             _whisper_command(
@@ -166,19 +172,18 @@ class TranscriptionJob:
         try:
             with tempfile.TemporaryDirectory() as temp_dir:
                 temp_dir_path = Path(temp_dir)
-                audio_path = temp_dir_path / self.filename
-                audio_path.write_bytes(self.audio_bytes)
+                uploaded_path = temp_dir_path / self.filename
+                uploaded_path.write_bytes(self.audio_bytes)
 
-                if audio_path.suffix.lower() == ".m4a":
-                    wav_path = temp_dir_path / f"{audio_path.stem}.wav"
+                if uploaded_path.suffix.lower() == ".wav":
+                    audio_path = uploaded_path
+                else:
+                    audio_path = temp_dir_path / "converted.wav"
                     rc = self._run_streamed(
-                        _ffmpeg_command(self.config, audio_path, wav_path), temp_dir_path
+                        _ffmpeg_command(self.config, uploaded_path, audio_path), temp_dir_path
                     )
                     if rc != 0:
                         raise RuntimeError("ffmpeg failed (see console output)")
-                    audio_path = wav_path
-                elif audio_path.suffix.lower() != ".wav":
-                    raise RuntimeError(f"unsupported audio format: {audio_path.suffix}")
 
                 rc = self._run_streamed(
                     _whisper_command(

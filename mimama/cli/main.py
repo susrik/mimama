@@ -280,7 +280,7 @@ def inference(ctx: click.Context, path: str, prompt: str) -> None:
 
 
 @cli.command()
-@click.option("--audio-file", required=True, help="Path to audio file (.m4a or .wav)")
+@click.option("--audio-file", required=True, help="Path to audio file")
 @click.option("--model-path", default=None, help="Path to whisper model file")
 @click.pass_context
 def transcribe(ctx: click.Context, audio_file: str, model_path: str | None) -> None:

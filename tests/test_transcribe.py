@@ -81,26 +81,32 @@ class TestRunTranscriptionPipelineWav:
         with pytest.raises(FileNotFoundError):
             run_transcription_pipeline(config, str(tmp_path / "nope.wav"))
 
-    def test_unsupported_format(
-        self,
-        config: Config,
-        tmp_path: Path
-    ) -> None:
-        audio = tmp_path / "meeting.mp3"
-        audio.write_bytes(b"x")
-        with pytest.raises(RuntimeError, match="unsupported audio format"):
-            run_transcription_pipeline(config, str(audio))
-
-
-class TestRunTranscriptionPipelineM4a:
-    def test_converts_then_transcribes(
+    def test_undecodable_format_surfaces_ffmpeg_error(
         self,
         config: Config,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        audio = tmp_path / "meeting.m4a"
-        audio.write_bytes(b"fake-m4a")
+        audio = tmp_path / "meeting.mp3"
+        audio.write_bytes(b"x")
+        monkeypatch.setattr(subprocess, "run", _fake_run_factory(ffmpeg_rc=1))
+        with pytest.raises(RuntimeError, match="ffmpeg failed"):
+            run_transcription_pipeline(config, str(audio))
+
+
+class TestRunTranscriptionPipelineNonWav:
+    """Any non-wav input (m4a, mp3, ...) is handed to ffmpeg unfiltered."""
+
+    @pytest.mark.parametrize("suffix", [".m4a", ".mp3", ".ogg"])
+    def test_converts_then_transcribes(
+        self,
+        config: Config,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        suffix: str,
+    ) -> None:
+        audio = tmp_path / f"meeting{suffix}"
+        audio.write_bytes(b"fake-audio")
         monkeypatch.setattr(subprocess, "run", _fake_run_factory())
         result = run_transcription_pipeline(config, str(audio))
         assert result == "hello transcript"
@@ -186,29 +192,32 @@ class TestTranscriptionJob:
         lines = list(iter(job.lines.get, DONE))
         assert any("whisper" in line for line in lines)
 
-    def test_m4a_upload_runs_ffmpeg_then_whisper(
+    @pytest.mark.parametrize("filename", ["meeting.m4a", "meeting.mp3", "upload"])
+    def test_non_wav_upload_runs_ffmpeg_then_whisper(
         self,
         config: Config,
-        monkeypatch: pytest.MonkeyPatch
+        monkeypatch: pytest.MonkeyPatch,
+        filename: str,
     ) -> None:
         monkeypatch.setattr(subprocess, "Popen", _fake_popen_factory())
-        job = TranscriptionJob(config=config, filename="meeting.m4a", audio_bytes=b"fake-m4a")
+        job = TranscriptionJob(config=config, filename=filename, audio_bytes=b"fake-audio")
         job._run()
         assert job.transcript == "streamed transcript"
         lines = list(iter(job.lines.get, DONE))
         assert any("ffmpeg" in line for line in lines)
         assert any("whisper" in line for line in lines)
 
-    def test_unsupported_format(
+    def test_undecodable_format_surfaces_ffmpeg_error(
         self,
         config: Config,
         monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(subprocess, "Popen", _fake_popen_factory(ffmpeg_rc=1))
         job = TranscriptionJob(config=config, filename="meeting.mp3", audio_bytes=b"x")
         job._run()
         assert job.transcript is None
         assert job.error is not None
-        assert "unsupported audio format" in job.error
+        assert "ffmpeg failed" in job.error
 
     def test_ffmpeg_failure_sets_error(
         self,

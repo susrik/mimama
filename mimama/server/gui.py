@@ -217,7 +217,7 @@ async def transcribe_start(
 ) -> dict[str, str]:
     config = _config(request)
     audio_bytes = await audio_file.read()
-    job = _jobs(request).create(config, audio_file.filename or "upload.wav", audio_bytes)
+    job = _jobs(request).create(config, audio_file.filename or "upload", audio_bytes)
     return {"job_id": job.id}
 
 
