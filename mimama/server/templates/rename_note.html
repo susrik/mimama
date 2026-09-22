@@ -1,0 +1,16 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">Rename Note</h2>
+    <form hx-post="/gui/note/rename" hx-target="#main" class="space-y-2">
+      <label class="form-control">
+        <span class="label-text">Current path</span>
+        <input type="text" name="old_path" value="{{ old_path }}" class="input input-bordered" readonly required>
+      </label>
+      <label class="form-control">
+        <span class="label-text">New path</span>
+        <input type="text" name="new_path" value="{{ new_path }}" class="input input-bordered" required>
+      </label>
+      <button type="submit" class="btn btn-primary">Rename</button>
+    </form>
+  </div>
+</div>

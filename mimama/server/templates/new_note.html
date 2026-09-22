@@ -1,0 +1,229 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">New file{% if folder %} in /{{ folder }}{% endif %}</h2>
+
+    <form id="new-note-form" hx-post="/gui/note/create" hx-target="#main" class="space-y-2"
+          hx-indicator="#new-note-working">
+      <input type="hidden" name="folder" value="{{ folder }}">
+
+      <label class="form-control">
+        <span class="label-text">Filename</span>
+        <input type="text" name="filename" value="{{ default_filename }}" class="input input-bordered" required>
+      </label>
+
+      <label class="label cursor-pointer justify-start gap-2">
+        <input type="checkbox" id="ai-checkbox" name="ai" class="checkbox">
+        <span class="label-text">AI</span>
+      </label>
+
+      <div id="ai-section" class="hidden space-y-2 border-l-2 border-base-300 pl-4">
+        {% if context_files %}
+        <div>
+          <span class="label-text">AGENTS.md context that will be used:</span>
+          <ul class="flex flex-wrap gap-2 mt-1">
+            {% for f in context_files %}
+            <li class="badge badge-outline tooltip" data-tip="{{ f.content }}">
+              {{ f.origin if f.origin else "(notes root)" }}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% else %}
+        <p class="text-sm text-base-content/60">No AGENTS.md context found for this folder.</p>
+        {% endif %}
+
+        <label class="form-control">
+          <span class="label-text">Context</span>
+          <textarea name="context" rows="3" class="textarea textarea-bordered"></textarea>
+        </label>
+
+        <label class="label cursor-pointer justify-start gap-2">
+          <input type="checkbox" id="transcript-checkbox" name="transcript" class="checkbox">
+          <span class="label-text">Meeting transcript</span>
+        </label>
+
+        <div id="transcript-section" class="hidden space-y-2">
+          <label class="form-control">
+            <span class="label-text">Transcript context</span>
+            <textarea name="transcript_instructions" rows="2"
+                      class="textarea textarea-bordered">{{ default_transcript_instructions }}</textarea>
+          </label>
+          <button type="button" class="btn btn-outline btn-sm" onclick="mimama.openTranscribeModal()">
+            Transcribe…
+          </button>
+        </div>
+      </div>
+
+      <label class="form-control">
+        <span class="label-text" id="content-label">Content</span>
+        <textarea name="content" id="content-textarea" rows="10" class="textarea textarea-bordered"></textarea>
+      </label>
+
+      <div class="flex items-center gap-2">
+        <button type="submit" id="submit-button" class="btn btn-primary">Create</button>
+        <span id="new-note-working" class="htmx-indicator loading loading-spinner loading-sm"></span>
+        <span class="htmx-indicator text-sm text-base-content/60">Working…</span>
+      </div>
+    </form>
+  </div>
+</div>
+
+<dialog id="generate-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Generating…</h3>
+    <pre id="generate-console"
+         class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+    <div class="modal-action">
+      <button type="button" id="generate-stop-button" class="btn btn-error btn-sm" disabled>Stop</button>
+      <button type="button" id="generate-close-button" class="btn btn-sm hidden"
+              onclick="document.getElementById('generate-modal').close()">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="transcribe-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Transcribe audio</h3>
+    <div id="transcribe-dropzone"
+         class="border-2 border-dashed border-base-300 rounded p-6 text-center mt-4 cursor-pointer"
+         onclick="document.getElementById('transcribe-file-input').click()">
+      <p>Drop a .wav or .m4a file here, or click to choose one</p>
+      <input type="file" id="transcribe-file-input" accept=".wav,.m4a" class="hidden">
+    </div>
+    <p id="transcribe-filename" class="text-sm mt-2"></p>
+    <pre id="transcribe-console"
+         class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+    <div class="modal-action">
+      <button type="button" id="transcribe-start-button" class="btn btn-primary" disabled
+              onclick="mimama.startTranscription()">Start</button>
+      <button type="button" id="transcribe-use-button" class="btn btn-primary" disabled
+              onclick="mimama.useTranscribeOutput()">Use Output</button>
+      <button type="button" class="btn" onclick="mimama.closeTranscribeModal()">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+window.mimama = window.mimama || {};
+(function () {
+  const aiCheckbox = document.getElementById("ai-checkbox");
+  const aiSection = document.getElementById("ai-section");
+  const transcriptCheckbox = document.getElementById("transcript-checkbox");
+  const transcriptSection = document.getElementById("transcript-section");
+  const submitButton = document.getElementById("submit-button");
+  const contentLabel = document.getElementById("content-label");
+  const form = document.getElementById("new-note-form");
+
+  function generateOnly() {
+    return aiCheckbox.checked && !transcriptCheckbox.checked;
+  }
+
+  function refreshLabels() {
+    submitButton.textContent = aiCheckbox.checked ? "Run inference" : "Create";
+    // When only generating (no transcript conversion), the submit button no
+    // longer submits the form directly — it starts a streamed job instead.
+    submitButton.type = generateOnly() ? "button" : "submit";
+    contentLabel.textContent = (aiCheckbox.checked && transcriptCheckbox.checked)
+      ? "Content (paste the transcript here)"
+      : "Content";
+  }
+
+  aiCheckbox.addEventListener("change", () => {
+    aiSection.classList.toggle("hidden", !aiCheckbox.checked);
+    refreshLabels();
+  });
+  transcriptCheckbox.addEventListener("change", () => {
+    transcriptSection.classList.toggle("hidden", !transcriptCheckbox.checked);
+    refreshLabels();
+  });
+  refreshLabels();
+
+  submitButton.addEventListener("click", () => {
+    if (!generateOnly()) return;
+    mimama.runInferenceJob({
+      startUrl: "/gui/note/create/generate/start",
+      streamUrlBase: "/gui/note/create/generate/stream",
+      cancelUrlBase: "/gui/note/create/generate/cancel",
+      formData: new FormData(form),
+      modalId: "generate-modal",
+      consoleId: "generate-console",
+      stopButtonId: "generate-stop-button",
+      closeButtonId: "generate-close-button",
+      onDone: mimama.swapMain,
+    });
+  });
+
+  let selectedFile = null;
+  let transcriptText = null;
+  const dropzone = document.getElementById("transcribe-dropzone");
+  const fileInput = document.getElementById("transcribe-file-input");
+  const startButton = document.getElementById("transcribe-start-button");
+  const useButton = document.getElementById("transcribe-use-button");
+  const filenameLabel = document.getElementById("transcribe-filename");
+  const consoleEl = document.getElementById("transcribe-console");
+
+  function setFile(file) {
+    selectedFile = file;
+    filenameLabel.textContent = file ? file.name : "";
+    startButton.disabled = !file;
+  }
+
+  fileInput.addEventListener("change", () => setFile(fileInput.files[0] || null));
+  dropzone.addEventListener("dragover", (e) => e.preventDefault());
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    setFile(e.dataTransfer.files[0] || null);
+  });
+
+  mimama.openTranscribeModal = function () {
+    consoleEl.textContent = "";
+    transcriptText = null;
+    useButton.disabled = true;
+    document.getElementById("transcribe-modal").showModal();
+  };
+  mimama.closeTranscribeModal = function () {
+    if (transcriptText !== null) {
+      const ok = confirm(
+        "A transcript was generated but not used. Close anyway and discard it?"
+      );
+      if (!ok) return;
+    }
+    document.getElementById("transcribe-modal").close();
+  };
+
+  mimama.useTranscribeOutput = function () {
+    if (transcriptText === null) return;
+    document.getElementById("content-textarea").value = transcriptText;
+    transcriptText = null;
+    document.getElementById("transcribe-modal").close();
+  };
+
+  mimama.startTranscription = async function () {
+    if (!selectedFile) return;
+    startButton.disabled = true;
+    useButton.disabled = true;
+    transcriptText = null;
+    consoleEl.textContent = "uploading…\n";
+    const form = new FormData();
+    form.append("audio_file", selectedFile);
+    const response = await fetch("/gui/transcribe/start", { method: "POST", body: form });
+    const { job_id } = await response.json();
+    const source = new EventSource(`/gui/transcribe/stream/${job_id}`);
+    source.onmessage = (event) => {
+      consoleEl.textContent += JSON.parse(event.data) + "\n";
+      consoleEl.scrollTop = consoleEl.scrollHeight;
+    };
+    source.addEventListener("done", (event) => {
+      const payload = JSON.parse(event.data);
+      source.close();
+      startButton.disabled = false;
+      if (payload.error) {
+        consoleEl.textContent += "ERROR: " + payload.error + "\n";
+        return;
+      }
+      transcriptText = payload.transcript;
+      useButton.disabled = false;
+    });
+  };
+})();
+</script>

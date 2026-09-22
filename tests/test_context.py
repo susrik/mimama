@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mimama.core.context import assemble_context
+from mimama.core.context import assemble_context, list_context_files
 from mimama.core.notes import NoteStore
 
 
@@ -58,3 +58,26 @@ def test_empty_context_file_skipped(store: NoteStore) -> None:
 
 def test_root_folder_itself(store: NoteStore) -> None:
     assert assemble_context(store, "") == "# Context from: (notes root)\n\nROOT CONTEXT"
+
+
+class TestListContextFiles:
+    def test_root_first_ordering(self, store: NoteStore) -> None:
+        files = list_context_files(store, "a/b")
+        assert [f.origin for f in files] == ["", "a", "a/b"]
+        assert [f.content for f in files] == ["ROOT CONTEXT", "A CONTEXT", "B CONTEXT"]
+
+    def test_file_path_uses_its_folder(self, store: NoteStore) -> None:
+        assert list_context_files(store, "a/b/note.md") == list_context_files(store, "a/b")
+
+    def test_missing_intermediate_skipped(self, store: NoteStore) -> None:
+        files = list_context_files(store, "plain")
+        assert [f.origin for f in files] == [""]
+
+    def test_empty_file_skipped(self, store: NoteStore) -> None:
+        (store.root / "a" / "AGENTS.md").write_text("   \n", encoding="utf-8")
+        files = list_context_files(store, "a/b")
+        assert [f.origin for f in files] == ["", "a/b"]
+
+    def test_no_context_anywhere(self, store: NoteStore) -> None:
+        (store.root / "AGENTS.md").unlink()
+        assert list_context_files(store, "plain") == []

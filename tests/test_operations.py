@@ -9,6 +9,7 @@ from mimama.core.notes import NoteStore
 from mimama.core.operations import (
     cleanup_note,
     default_minutes_filename,
+    generate_note_content,
     transcript_to_minutes,
 )
 from tests.fakes import FakeLLMClient
@@ -64,6 +65,31 @@ class TestTranscriptToMinutes:
         transcript_to_minutes(store, llm, "meetings", "t", filename="x.md")
         system, _ = llm.calls[0]
         assert "Context for this folder" not in system
+
+
+class TestGenerateNoteContent:
+    def test_combines_context_and_content(self, store: NoteStore) -> None:
+        llm = FakeLLMClient(responses=["generated"])
+        result = generate_note_content(
+            store, llm, "meetings/new.md", "write about X", "some seed content"
+        )
+        assert result == "generated"
+        _, user = llm.calls[0]
+        assert "write about X" in user
+        assert "some seed content" in user
+
+    def test_no_context_falls_back_to_content(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        generate_note_content(store, llm, "meetings/new.md", "", "just content")
+        _, user = llm.calls[0]
+        assert user == "just content"
+
+    def test_hierarchical_system_context(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        generate_note_content(store, llm, "meetings/new.md", "c", "x")
+        system, _ = llm.calls[0]
+        assert "ROOT CONTEXT" in system
+        assert "MEETINGS CONTEXT" in system
 
 
 class TestCleanupNote:

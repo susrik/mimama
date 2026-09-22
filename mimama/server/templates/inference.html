@@ -1,0 +1,52 @@
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h2 class="card-title">AI Processing for {{ path }}</h2>
+    
+    {% if context %}
+    <details class="collapse collapse-arrow bg-base-200 mb-4">
+      <summary class="collapse-title text-sm">Context used (AGENTS.md chain)</summary>
+      <div class="collapse-content"><pre class="whitespace-pre-wrap text-xs">{{ context }}</pre></div>
+    </details>
+    {% endif %}
+    
+    <form id="inference-form" class="space-y-2">
+      <input type="hidden" name="path" value="{{ path }}">
+      <label class="form-control">
+        <span class="label-text">Prompt</span>
+        <textarea name="prompt" rows="5" class="textarea textarea-bordered" required></textarea>
+      </label>
+      <button type="button" id="inference-submit-button" class="btn btn-primary">Run Inference</button>
+    </form>
+  </div>
+</div>
+
+<dialog id="inference-modal" class="modal">
+  <div class="modal-box">
+    <h3 class="font-bold text-lg">Running inference…</h3>
+    <pre id="inference-console"
+         class="bg-base-200 text-xs p-2 rounded mt-4 h-48 overflow-y-auto whitespace-pre-wrap"></pre>
+    <div class="modal-action">
+      <button type="button" id="inference-stop-button" class="btn btn-error btn-sm" disabled>Stop</button>
+      <button type="button" id="inference-close-button" class="btn btn-sm hidden"
+              onclick="document.getElementById('inference-modal').close()">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+  document.getElementById("inference-submit-button").addEventListener("click", () => {
+    const form = document.getElementById("inference-form");
+    if (!form.reportValidity()) return;
+    mimama.runInferenceJob({
+      startUrl: "/gui/note/inference/start",
+      streamUrlBase: "/gui/note/inference/stream",
+      cancelUrlBase: "/gui/note/inference/cancel",
+      formData: new FormData(form),
+      modalId: "inference-modal",
+      consoleId: "inference-console",
+      stopButtonId: "inference-stop-button",
+      closeButtonId: "inference-close-button",
+      onDone: mimama.swapMain,
+    });
+  });
+</script>

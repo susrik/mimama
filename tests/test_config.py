@@ -18,11 +18,22 @@ from mimama.config import (
 
 def valid_config_dict(notes_root: str) -> dict[str, object]:
     return {
-        "notes_root": notes_root,
+        "notes": {
+            "root": notes_root,
+            "git": False,
+            "git_exe": "git"
+        },
         "llm": {
             "base_url": "http://llm.example/v1",
             "api_key": "sk-test",
             "model": "test-model",
+        },
+        "transcripts": {
+            "ffmpeg": "ffmpeg",
+            "whisper": {
+                "cli": "whisper-cli",
+                "model": "~/bin/whisper-models/ggml-large-v3-turbo.bin"
+            }
         },
     }
 
@@ -36,7 +47,7 @@ class TestLoadConfig:
     def test_minimal_valid_config(self, tmp_path: Path) -> None:
         cfg_file = write_config(tmp_path / "c.json", valid_config_dict(str(tmp_path)))
         cfg = load_config(cfg_file)
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
         assert cfg.llm.model == "test-model"
 
     def test_defaults_applied(self, tmp_path: Path) -> None:
@@ -85,13 +96,31 @@ class TestLoadConfig:
         with pytest.raises(ConfigError, match="invalid"):
             load_config(bad)
 
+    def test_missing_transcripts_config(self, tmp_path: Path) -> None:
+        # Test that missing transcripts config fails validation
+        data = valid_config_dict(str(tmp_path))
+        # Remove transcripts section to test missing required field
+        del data["transcripts"]
+        bad = write_config(tmp_path / "bad.json", data)
+        with pytest.raises(ConfigError, match="transcripts"):
+            load_config(bad)
+
+    def test_invalid_whisper_config(self, tmp_path: Path) -> None:
+        # Test that missing whisper model fails validation
+        data = valid_config_dict(str(tmp_path))
+        # Remove model from whisper config to test required field
+        del data["transcripts"]["whisper"]["model"]
+        bad = write_config(tmp_path / "bad.json", data)
+        with pytest.raises(ConfigError, match="model"):
+            load_config(bad)
+
     def test_filename_from_env_var(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         cfg_file = write_config(tmp_path / "env.json", valid_config_dict(str(tmp_path)))
         monkeypatch.setenv(CONFIG_ENV_VAR, str(cfg_file))
         cfg = load_config()
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
 
     def test_default_filename_without_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -100,7 +129,7 @@ class TestLoadConfig:
         monkeypatch.chdir(tmp_path)
         write_config(tmp_path / "mimama.json", valid_config_dict(str(tmp_path)))
         cfg = load_config()
-        assert cfg.notes_root == tmp_path
+        assert cfg.notes.root == tmp_path
 
 
 class TestClickConfigCallback:
@@ -109,7 +138,7 @@ class TestClickConfigCallback:
         @click.command()
         @click.option("--config", callback=click_config_callback)
         def cli(config: Config) -> None:
-            click.echo(f"root={config.notes_root}")
+            click.echo(f"root={config.notes.root}")
 
         return cli
 

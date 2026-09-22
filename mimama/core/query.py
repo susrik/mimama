@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -26,6 +28,10 @@ from pydantic import BaseModel, Field, ValidationError
 from mimama.config import QueryConfig, UserConfig
 from mimama.core.llm import SupportsComplete
 from mimama.core.notes import NoteError, NoteInfo, NoteStore
+
+
+def _noop(_chunk: str) -> None:
+    return None
 
 
 class QueryError(Exception):
@@ -90,6 +96,8 @@ def plan_query(
     question: str,
     user: UserConfig,
     today: date | None = None,
+    on_chunk: Callable[[str], None] = _noop,
+    cancel_event: threading.Event | None = None,
 ) -> QueryPlan:
     """Stage 1: one LLM call producing a validated QueryPlan (1 retry)."""
     today = today or date.today()
@@ -101,7 +109,9 @@ def plan_query(
     prompt = f"Today is {today.isoformat()}. {user_desc}\n\nQuestion: {question}"
     last_error: Exception | None = None
     for _ in range(2):
-        raw = llm.complete(system=_PLAN_SYSTEM, user=prompt)
+        raw = llm.stream_complete(
+            system=_PLAN_SYSTEM, user=prompt, on_chunk=on_chunk, cancel_event=cancel_event
+        )
         try:
             return QueryPlan.model_validate_json(_extract_json(raw))
         except ValidationError as exc:
@@ -170,6 +180,8 @@ def rerank(
     candidates: list[NoteInfo],
     keywords: list[str],
     settings: QueryConfig,
+    on_chunk: Callable[[str], None] = _noop,
+    cancel_event: threading.Event | None = None,
 ) -> list[tuple[NoteInfo, str]]:
     """Stage 3: LLM selects/justifies relevant candidates from capped excerpts."""
     capped = candidates[: settings.max_candidates]
@@ -182,7 +194,9 @@ def rerank(
     prompt = f"Question: {question}\n\nCandidate notes:\n\n" + "\n\n".join(sections)
     last_error: Exception | None = None
     for _ in range(2):
-        raw = llm.complete(system=_RERANK_SYSTEM, user=prompt)
+        raw = llm.stream_complete(
+            system=_RERANK_SYSTEM, user=prompt, on_chunk=on_chunk, cancel_event=cancel_event
+        )
         try:
             items = json.loads(_extract_json(raw))
             choices = [_RerankChoice.model_validate(item) for item in items]
@@ -206,12 +220,24 @@ def run_query(
     user: UserConfig,
     settings: QueryConfig,
     today: date | None = None,
+    on_chunk: Callable[[str], None] = _noop,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[QueryPlan, list[QueryResult]]:
     """Full pipeline. Returns the plan (for transparency) and ranked results."""
-    plan = plan_query(llm, question, user, today=today)
+    plan = plan_query(
+        llm, question, user, today=today, on_chunk=on_chunk, cancel_event=cancel_event
+    )
     candidates = prefilter(store, plan)
     if plan.semantic_question and candidates:
-        ranked = rerank(llm, plan.semantic_question, candidates, plan.keywords, settings)
+        ranked = rerank(
+            llm,
+            plan.semantic_question,
+            candidates,
+            plan.keywords,
+            settings,
+            on_chunk=on_chunk,
+            cancel_event=cancel_event,
+        )
         results = [
             QueryResult(
                 path=info.path,

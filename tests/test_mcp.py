@@ -169,8 +169,9 @@ class TestBuildServer:
         cfg_file.write_text(
             json.dumps(
                 {
-                    "notes_root": str(tmp_path),
+                    "notes": {"root": str(tmp_path), "git": False},
                     "llm": {"base_url": "http://x/v1", "api_key": "k", "model": "m"},
+                    "transcripts": {"whisper": {"model": "/fake/models/ggml-test.bin"}},
                 }
             ),
             encoding="utf-8",

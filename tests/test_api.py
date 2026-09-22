@@ -66,6 +66,98 @@ class TestNote:
         assert client.put("/api/note", json=body.model_dump()).status_code == 400
 
 
+class TestDelete:
+    def test_delete(self, client: TestClient) -> None:
+        body = schemas.NoteDeleteRequest(path="todo.md")
+        response = client.request("DELETE", "/api/note", json=body.model_dump())
+        assert response.status_code == 200
+        assert client.get("/api/note", params={"path": "todo.md"}).status_code == 404
+
+    def test_missing_note_404(self, client: TestClient) -> None:
+        body = schemas.NoteDeleteRequest(path="nope.md")
+        response = client.request("DELETE", "/api/note", json=body.model_dump())
+        assert response.status_code == 404
+
+
+class TestRename:
+    def test_rename(self, client: TestClient) -> None:
+        body = schemas.NoteRenameRequest(old_path="todo.md", new_path="renamed.md")
+        response = client.post("/api/note/rename", json=body.model_dump())
+        assert response.status_code == 200
+        assert client.get("/api/note", params={"path": "todo.md"}).status_code == 404
+        assert (
+            client.get("/api/note", params={"path": "renamed.md"}).json()["content"]
+            == "buy milk"
+        )
+
+    def test_missing_note_400(self, client: TestClient) -> None:
+        body = schemas.NoteRenameRequest(old_path="nope.md", new_path="x.md")
+        response = client.post("/api/note/rename", json=body.model_dump())
+        assert response.status_code == 400
+
+
+class TestCreate:
+    def test_create(self, client: TestClient) -> None:
+        body = schemas.NoteCreateRequest(path="brand-new.md", content="hi")
+        response = client.post("/api/note/create", json=body.model_dump())
+        assert response.status_code == 200
+        result = schemas.NoteCreateResponse.model_validate(response.json())
+        assert result.path == "brand-new.md"
+        assert (
+            client.get("/api/note", params={"path": "brand-new.md"}).json()["content"]
+            == "hi"
+        )
+
+    def test_bad_path_400(self, client: TestClient) -> None:
+        body = schemas.NoteCreateRequest(path="../evil.md")
+        response = client.post("/api/note/create", json=body.model_dump())
+        assert response.status_code == 400
+
+
+class TestGitStaging:
+    """Git integration end-to-end: notes.git=true stages every mutation."""
+
+    @pytest.fixture()
+    def git_client(self, config, notes_root, fake_llm: FakeLLMClient):  # type: ignore[no-untyped-def]
+        import subprocess
+
+        from mimama.server.app import create_app
+
+        subprocess.run(["git", "init", "-q"], cwd=notes_root, check=True)
+        config.notes.git = True
+        app = create_app(config=config, llm=fake_llm)
+        with TestClient(app) as test_client:
+            yield test_client
+
+    def _staged(self, notes_root) -> set[str]:  # type: ignore[no-untyped-def]
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--no-renames"],
+            cwd=notes_root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return set(result.stdout.split())
+
+    def test_write_stages(self, git_client: TestClient, notes_root) -> None:  # type: ignore[no-untyped-def]
+        body = schemas.NoteWriteRequest(path="staged.md", content="x")
+        git_client.put("/api/note", json=body.model_dump())
+        assert "staged.md" in self._staged(notes_root)
+
+    def test_create_stages(self, git_client: TestClient, notes_root) -> None:  # type: ignore[no-untyped-def]
+        body = schemas.NoteCreateRequest(path="created.md", content="x")
+        git_client.post("/api/note/create", json=body.model_dump())
+        assert "created.md" in self._staged(notes_root)
+
+    def test_convert_stages(self, git_client: TestClient, notes_root, fake_llm) -> None:  # type: ignore[no-untyped-def]
+        fake_llm.responses = ["# Minutes"]
+        body = schemas.ConvertRequest(folder="", transcript="t", filename="conv.md")
+        git_client.post("/api/operations/convert", json=body.model_dump())
+        assert "conv.md" in self._staged(notes_root)
+
+
 class TestContext:
     def test_hierarchical(self, client: TestClient) -> None:
         ctx = schemas.ContextResponse.model_validate(
@@ -132,6 +224,19 @@ class TestCleanup:
         body = schemas.CleanupRequest(path="nope.md")
         response = client.post("/api/operations/cleanup", json=body.model_dump())
         assert response.status_code == 404
+
+
+class TestInference:
+    def test_runs_with_context(self, client: TestClient, fake_llm: FakeLLMClient) -> None:
+        fake_llm.responses = ["result"]
+        body = schemas.InferenceRequest(path="projects/eurohpc", prompt="summarize")
+        response = client.post("/api/operations/inference", json=body.model_dump())
+        assert response.status_code == 200
+        result = schemas.InferenceResponse.model_validate(response.json())
+        assert result.content == "result"
+        system, user = fake_llm.calls[0]
+        assert "ROOT CONTEXT" in system
+        assert user == "summarize"
 
 
 class TestQuery:

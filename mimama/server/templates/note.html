@@ -7,9 +7,16 @@
         <input type="hidden" name="path" value="{{ path }}">
         <button type="submit" class="btn btn-secondary btn-sm">Clean up with LLM</button>
       </form>
+      
+      <button class="btn btn-outline btn-sm" 
+              hx-get="/gui/note/inference?path={{ path }}" 
+              hx-target="#main">
+        AI Processing
+      </button>
     </div>
+    
     {% if context %}
-    <details class="collapse collapse-arrow bg-base-200">
+    <details class="collapse collapse-arrow bg-base-200 mt-4">
       <summary class="collapse-title text-sm">Folder context (AGENTS.md chain)</summary>
       <div class="collapse-content"><pre class="whitespace-pre-wrap text-xs">{{ context }}</pre></div>
     </details>

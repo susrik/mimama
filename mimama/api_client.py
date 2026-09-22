@@ -91,4 +91,39 @@ class APIClient:
         r = self._check(self._client.post("/api/query", json=body.model_dump()))
         return schemas.QueryResponse.model_validate_json(r.text)
 
+    def create_note(self, path: str, content: str | None = None) -> schemas.NoteCreateResponse:
+        body = schemas.NoteCreateRequest(path=path, content=content)
+        r = self._check(
+            self._client.post("/api/note/create", json=body.model_dump())
+        )
+        return schemas.NoteCreateResponse.model_validate_json(r.text)
+
+    def rename_note(self, old_path: str, new_path: str) -> schemas.NoteRenameResponse:
+        body = schemas.NoteRenameRequest(old_path=old_path, new_path=new_path)
+        r = self._check(
+            self._client.post("/api/note/rename", json=body.model_dump())
+        )
+        return schemas.NoteRenameResponse.model_validate_json(r.text)
+
+    def delete_note(self, path: str) -> schemas.NoteDeleteResponse:
+        body = schemas.NoteDeleteRequest(path=path)
+        r = self._check(
+            self._client.delete("/api/note", json=body.model_dump())
+        )
+        return schemas.NoteDeleteResponse.model_validate_json(r.text)
+
+    def run_inference(self, path: str, prompt: str) -> schemas.InferenceResponse:
+        body = schemas.InferenceRequest(path=path, prompt=prompt)
+        r = self._check(
+            self._client.post("/api/operations/inference", json=body.model_dump())
+        )
+        return schemas.InferenceResponse.model_validate_json(r.text)
+
+    def transcribe(self, audio_file: str, model_path: str | None = None) -> schemas.TranscriptionResponse:
+        body = schemas.TranscriptionRequest(audio_file=audio_file, model_path=model_path)
+        r = self._check(
+            self._client.post("/api/transcribe", json=body.model_dump())
+        )
+        return schemas.TranscriptionResponse.model_validate_json(r.text)
+
 

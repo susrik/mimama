@@ -1,9 +1,18 @@
 {
-  "notes_root": "/data/notes",
+  "notes": {
+    "root": "/data/notes",
+    "git": false,
+    "git_exe": "git"
+  },
   "llm": {
     "base_url": "http://litellm.example:4000/v1",
     "api_key": "sk-REPLACE-ME",
     "model": "gpt-4o"
+  },
+  "transcripts": {
+    "whisper": {
+      "model": "~/whisper/models/ggml-large-v3-turbo.bin"
+    }
   },
   "server": {
     "host": "0.0.0.0",
