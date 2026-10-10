@@ -3,7 +3,7 @@
     <h2 class="card-title">New file{% if folder %} in /{{ folder }}{% endif %}</h2>
 
     <form id="new-note-form" hx-post="/gui/note/create" hx-target="#main" class="space-y-2"
-          hx-indicator="#new-note-working">
+          enctype="multipart/form-data" hx-indicator="#new-note-working">
       <input type="hidden" name="folder" value="{{ folder }}">
 
       <label class="form-control">
@@ -31,6 +31,16 @@
         {% else %}
         <p class="text-sm text-base-content/60">No AGENTS.md context found for this folder.</p>
         {% endif %}
+
+        <div>
+          <span class="label-text">Attach local files to the context</span>
+          <div id="context-files-dropzone"
+               class="border-2 border-dashed border-base-300 rounded p-4 text-center mt-1 cursor-pointer">
+            <p class="text-sm text-base-content/60">Drop files here, or click to choose (multi-select)</p>
+            <input type="file" id="context-files-input" name="context_files" multiple class="hidden">
+          </div>
+          <ul id="context-files-pills" class="flex flex-wrap gap-2 mt-2"></ul>
+        </div>
 
         <label class="form-control">
           <span class="label-text">Context</span>
@@ -137,6 +147,59 @@ window.mimama = window.mimama || {};
     refreshLabels();
   });
   refreshLabels();
+
+  // -- local files added to the AI context --------------------------------
+  const contextFilesInput = document.getElementById("context-files-input");
+  const contextFilesDropzone = document.getElementById("context-files-dropzone");
+  const contextFilesPills = document.getElementById("context-files-pills");
+  const selectedContextFiles = [];
+
+  function syncFileInput() {
+    const dt = new DataTransfer();
+    selectedContextFiles.forEach((f) => dt.items.add(f));
+    contextFilesInput.files = dt.files;
+  }
+
+  function renderContextFilePills() {
+    contextFilesPills.innerHTML = "";
+    selectedContextFiles.forEach((file, index) => {
+      const li = document.createElement("li");
+      li.className = "badge badge-outline gap-1";
+      const label = document.createElement("span");
+      label.textContent = file.name;
+      li.appendChild(label);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.textContent = "\u00d7";
+      remove.className = "cursor-pointer";
+      remove.setAttribute("aria-label", "remove " + file.name);
+      remove.addEventListener("click", () => {
+        selectedContextFiles.splice(index, 1);
+        syncFileInput();
+        renderContextFilePills();
+      });
+      li.appendChild(remove);
+      contextFilesPills.appendChild(li);
+    });
+  }
+
+  function addContextFiles(fileList) {
+    Array.from(fileList).forEach((f) => selectedContextFiles.push(f));
+    syncFileInput();
+    renderContextFilePills();
+  }
+
+  contextFilesDropzone.addEventListener("click", () => contextFilesInput.click());
+  contextFilesInput.addEventListener("change", () => {
+    const files = Array.from(contextFilesInput.files);
+    contextFilesInput.value = "";
+    addContextFiles(files);
+  });
+  contextFilesDropzone.addEventListener("dragover", (e) => e.preventDefault());
+  contextFilesDropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    addContextFiles(e.dataTransfer.files);
+  });
 
   submitButton.addEventListener("click", () => {
     if (!generateOnly()) return;

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from mimama.core.context import AttachedFile
 from mimama.core.notes import NoteStore
 from mimama.core.operations import (
     cleanup_note,
@@ -93,6 +94,29 @@ class TestTranscriptToMinutes:
             "Read the following transcript and produce meeting minutes"
         )
 
+    def test_attached_files_appended_to_user_prompt(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        transcript_to_minutes(
+            store,
+            llm,
+            "meetings",
+            "THE TRANSCRIPT BODY",
+            filename="x.md",
+            files=[AttachedFile(name="ref.txt", content="REF DATA")],
+        )
+        _, user = llm.calls[0]
+        assert "# Attached file: ref.txt" in user
+        assert "REF DATA" in user
+        # attached files land in the user prompt, never the system context
+        system, _ = llm.calls[0]
+        assert "REF DATA" not in system
+
+    def test_no_attached_files_leaves_prompt_unchanged(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        transcript_to_minutes(store, llm, "meetings", "t", filename="x.md", files=None)
+        _, user = llm.calls[0]
+        assert "# Attached file:" not in user
+
 
 class TestGenerateNoteContent:
     def test_combines_context_and_content(self, store: NoteStore) -> None:
@@ -117,6 +141,27 @@ class TestGenerateNoteContent:
         system, _ = llm.calls[0]
         assert "ROOT CONTEXT" in system
         assert "MEETINGS CONTEXT" in system
+
+    def test_attached_files_appended_to_user_prompt(self, store: NoteStore) -> None:
+        llm = FakeLLMClient(responses=["generated"])
+        generate_note_content(
+            store,
+            llm,
+            "meetings/new.md",
+            "write about X",
+            "seed",
+            files=[AttachedFile(name="notes.txt", content="NOTES DATA")],
+        )
+        system, user = llm.calls[0]
+        assert "# Attached file: notes.txt" in user
+        assert "NOTES DATA" in user
+        assert "NOTES DATA" not in system
+
+    def test_no_attached_files_leaves_prompt_unchanged(self, store: NoteStore) -> None:
+        llm = FakeLLMClient(responses=["generated"])
+        generate_note_content(store, llm, "meetings/new.md", "write about X", "seed")
+        _, user = llm.calls[0]
+        assert "# Attached file:" not in user
 
 
 class TestCleanupNote:

@@ -8,9 +8,14 @@ target folder — root first, so general context precedes specific context.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
+from mimama.core.documents import DocumentError, extract_text, is_document
 from mimama.core.notes import CONTEXT_FILENAME, NoteStore
+
+
+class FileContextError(Exception):
+    """A server-side file selected for AI context could not be read."""
 
 
 @dataclass
@@ -19,6 +24,73 @@ class ContextFile:
 
     origin: str  # relative folder, "" for the notes root
     content: str
+
+
+@dataclass
+class AttachedFile:
+    """One local file added to the AI inference context (by upload or path).
+
+    ``name`` is only for labeling the file in the assembled prompt; it is
+    never used as a filesystem path on the server.
+    """
+
+    name: str
+    content: str
+
+
+def read_files(paths: list[str], max_chars: int | None = None) -> list[AttachedFile]:
+    """Read arbitrary server files into :class:`AttachedFile` instances.
+
+    Paths may be absolute or relative to the server's working directory. Text
+    files are decoded as UTF-8; supported binary documents (``.pptx``,
+    ``.docx``, ``.pdf``, ``.xlsx``, ``.doc``) have their text extracted.
+    Raises :class:`FileContextError` if a path is missing, unreadable as text
+    or an unknown document type, or exceeds ``max_chars``.
+    """
+    attached = []
+    for path in paths:
+        candidate = Path(path)
+        if not candidate.is_file():
+            raise FileContextError(f"no such file: {path!r}")
+        data = candidate.read_bytes()
+        attached.append(decode_attachment(candidate.name, data, max_chars))
+    return attached
+
+
+def decode_attachment(name: str, data: bytes, max_chars: int | None = None) -> AttachedFile:
+    """Decode one attachment's raw bytes into an :class:`AttachedFile`.
+
+    Supported binary documents (by extension) have their text extracted;
+    anything else is treated as UTF-8 text. Raises :class:`FileContextError`
+    for binary content that is neither a supported document nor valid UTF-8,
+    for documents with no extractable text, and for content exceeding
+    ``max_chars``.
+    """
+    if is_document(name):
+        try:
+            content = extract_text(name, data)
+        except DocumentError as exc:
+            raise FileContextError(str(exc)) from exc
+        if not content.strip():
+            raise FileContextError(f"no extractable text in {name!r}")
+    else:
+        try:
+            content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise FileContextError(f"not a text file: {name!r}") from exc
+    if max_chars is not None and len(content) > max_chars:
+        raise FileContextError(
+            f"attached file too large: {name!r} ({len(content)} chars > {max_chars})"
+        )
+    return AttachedFile(name=name, content=content)
+
+
+def format_files_context(files: list[AttachedFile]) -> str:
+    """Render attached files as a labelled context block ("" when empty)."""
+    if not files:
+        return ""
+    blocks = [f"# Attached file: {f.name}\n\n{f.content.strip()}" for f in files]
+    return "\n\n---\n\n".join(blocks)
 
 
 def list_context_files(store: NoteStore, relative: str) -> list[ContextFile]:

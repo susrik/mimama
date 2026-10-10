@@ -94,6 +94,13 @@ class QueryConfig(BaseModel):
     excerpt_chars: int = 1200
 
 
+class AttachmentsConfig(BaseModel):
+    """Bounds for local files attached to the AI inference context."""
+
+    max_file_chars: int = 100_000
+    """Reject an attached file whose decoded/extracted text exceeds this many characters."""
+
+
 class Config(BaseModel):
     notes: NotesConfig
     llm: LLMConfig
@@ -103,6 +110,7 @@ class Config(BaseModel):
     listeners: ListenersConfig = Field(default_factory=ListenersConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     query: QueryConfig = Field(default_factory=QueryConfig)
+    attachments: AttachmentsConfig = Field(default_factory=AttachmentsConfig)
 
 
 class ConfigError(Exception):

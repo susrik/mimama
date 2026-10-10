@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePosixPath
 
-from mimama.core.context import assemble_context
+from mimama.core.context import AttachedFile, assemble_context, format_files_context
 from mimama.core.llm import SupportsComplete
 from mimama.core.notes import NoteStore
 
@@ -50,6 +50,14 @@ def _system_prompt(store: NoteStore, folder: str) -> str:
     return _BASE_SYSTEM
 
 
+def _combine_with_files(base: str, files: list[AttachedFile] | None) -> str:
+    """Append attached-file context to a user prompt (unchanged when none)."""
+    extra = format_files_context(files or [])
+    if not extra:
+        return base
+    return f"{base}\n\n---\n\n{extra}" if base else extra
+
+
 def default_minutes_filename(today: date | None = None) -> str:
     return f"{(today or date.today()).isoformat()}-minutes.md"
 
@@ -62,17 +70,20 @@ def transcript_to_minutes(
     filename: str | None = None,
     instructions: str | None = None,
     context: str | None = None,
+    files: list[AttachedFile] | None = None,
 ) -> OperationResult:
     """Convert a raw transcript to meeting minutes, written into ``folder``.
 
     ``instructions`` is the (editable) prompt describing what to do with the
     transcript; it defaults to :data:`DEFAULT_TRANSCRIPT_INSTRUCTIONS`.
     ``context`` is optional free-form context prepended to the instructions.
+    ``files`` are optional attached local files appended to the user prompt.
     """
     filename = filename or default_minutes_filename()
     target = (PurePosixPath(folder) / filename).as_posix()
     instructions = instructions or DEFAULT_TRANSCRIPT_INSTRUCTIONS
     user = f"{context}\n\n{instructions}" if context else instructions
+    user = _combine_with_files(user, files)
     content = llm.complete(
         system=_system_prompt(store, folder),
         user=f"{user}\n--- TRANSCRIPT ---\n{transcript}",
@@ -89,16 +100,19 @@ def generate_note_content(
     content: str,
     on_chunk: Callable[[str], None] = _noop,
     cancel_event: threading.Event | None = None,
+    files: list[AttachedFile] | None = None,
 ) -> str:
     """Run a free-form AI generation for the "new file" flow.
 
     ``context`` and ``content`` (the user-supplied "context" and "content"
     fields from the new-file dialog) become the prompt; ``path``'s folder
-    supplies the hierarchical AGENTS.md system context. ``on_chunk``/
+    supplies the hierarchical AGENTS.md system context. ``files`` are optional
+    attached local files appended to the user prompt. ``on_chunk``/
     ``cancel_event`` let callers stream the response and cancel mid-flight
     (see ``mimama.core.llm.LLMClient.stream_complete``).
     """
     user = f"{context}\n\n{content}".strip() if context else content
+    user = _combine_with_files(user, files)
     return llm.stream_complete(
         system=_system_prompt(store, path), user=user, on_chunk=on_chunk, cancel_event=cancel_event
     )

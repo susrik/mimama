@@ -70,6 +70,13 @@
       modal.showModal();
 
       const response = await fetch(startUrl, { method: "POST", body: formData });
+      if (!response.ok) {
+        let detail = "HTTP " + response.status;
+        try { detail = (await response.json()).detail || detail; } catch (_) {}
+        consoleEl.textContent += "ERROR: " + detail + "\n";
+        if (closeButton) closeButton.classList.remove("hidden");
+        return;
+      }
       const { job_id } = await response.json();
       const source = new EventSource(`${streamUrlBase}/${job_id}`);
 

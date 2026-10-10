@@ -109,3 +109,15 @@ def test_stream_complete_cancelled_raises_and_stops_early() -> None:
     # cancellation is checked before processing the *next* chunk, so "a" was
     # already delivered but "b"/"c" were not.
     assert seen == ["a"]
+
+
+@respx.mock
+def test_api_error_wrapped_as_llm_error() -> None:
+    # A 400 from the upstream (e.g. context-window exceeded) must surface as
+    # LLMError rather than an uncaught openai exception.
+    body = {"error": {"message": "prompt is too long", "type": "invalid_request_error"}}
+    respx.post(f"{BASE_URL}/chat/completions").mock(
+        return_value=httpx.Response(400, json=body)
+    )
+    with pytest.raises(LLMError, match="LLM request failed"):
+        make_client().complete(system="s", user="u")

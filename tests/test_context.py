@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from mimama.core.context import assemble_context, list_context_files
+from mimama.core.context import (
+    AttachedFile,
+    FileContextError,
+    assemble_context,
+    format_files_context,
+    list_context_files,
+    read_files,
+)
 from mimama.core.notes import NoteStore
 
 
@@ -81,3 +88,44 @@ class TestListContextFiles:
     def test_no_context_anywhere(self, store: NoteStore) -> None:
         (store.root / "AGENTS.md").unlink()
         assert list_context_files(store, "plain") == []
+
+
+class TestReadFiles:
+    def test_reads_paths_into_attached_files(self, tmp_path: Path) -> None:
+        (tmp_path / "one.txt").write_text("ONE BODY", encoding="utf-8")
+        (tmp_path / "two.md").write_text("TWO BODY", encoding="utf-8")
+        attached = read_files([str(tmp_path / "one.txt"), str(tmp_path / "two.md")])
+        assert attached == [
+            AttachedFile(name="one.txt", content="ONE BODY"),
+            AttachedFile(name="two.md", content="TWO BODY"),
+        ]
+
+    def test_missing_file_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileContextError, match="no such file"):
+            read_files([str(tmp_path / "nope.txt")])
+
+    def test_binary_file_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "bin.dat").write_bytes(b"\x00\xff\x01")
+        with pytest.raises(FileContextError, match="not a text file"):
+            read_files([str(tmp_path / "bin.dat")])
+
+    def test_empty_list_returns_empty(self) -> None:
+        assert read_files([]) == []
+
+
+class TestFormatFilesContext:
+    def test_empty_returns_empty(self) -> None:
+        assert format_files_context([]) == ""
+
+    def test_labels_each_file(self) -> None:
+        result = format_files_context(
+            [
+                AttachedFile(name="a.txt", content="AAA"),
+                AttachedFile(name="b.txt", content="BBB"),
+            ]
+        )
+        assert "# Attached file: a.txt" in result
+        assert "AAA" in result
+        assert "# Attached file: b.txt" in result
+        assert "BBB" in result
+        assert result.index("AAA") < result.index("BBB")
