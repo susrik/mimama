@@ -66,6 +66,33 @@ class TestTranscriptToMinutes:
         system, _ = llm.calls[0]
         assert "Context for this folder" not in system
 
+    def test_context_and_instructions_in_user_prompt(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        transcript_to_minutes(
+            store,
+            llm,
+            "meetings",
+            "THE TRANSCRIPT BODY",
+            filename="x.md",
+            instructions="make bullets",
+            context="EXTRA CONTEXT",
+        )
+        system, user = llm.calls[0]
+        assert "EXTRA CONTEXT" not in system
+        assert "EXTRA CONTEXT" in user
+        assert "make bullets" in user
+        assert "THE TRANSCRIPT BODY" in user
+        assert user.index("EXTRA CONTEXT") < user.index("make bullets")
+        assert user.index("make bullets") < user.index("THE TRANSCRIPT BODY")
+
+    def test_no_context_leaves_prompt_unchanged(self, store: NoteStore) -> None:
+        llm = FakeLLMClient()
+        transcript_to_minutes(store, llm, "meetings", "t", filename="x.md")
+        _, user = llm.calls[0]
+        assert user.startswith(
+            "Read the following transcript and produce meeting minutes"
+        )
+
 
 class TestGenerateNoteContent:
     def test_combines_context_and_content(self, store: NoteStore) -> None:

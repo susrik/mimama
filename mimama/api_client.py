@@ -69,10 +69,19 @@ class APIClient:
         return schemas.SearchResponse.model_validate_json(r.text)
 
     def convert(
-        self, folder: str, transcript: str, filename: str | None = None
+        self,
+        folder: str,
+        transcript: str,
+        filename: str | None = None,
+        instructions: str | None = None,
+        context: str | None = None,
     ) -> schemas.OperationResponse:
         body = schemas.ConvertRequest(
-            folder=folder, transcript=transcript, filename=filename
+            folder=folder,
+            transcript=transcript,
+            filename=filename,
+            instructions=instructions,
+            context=context,
         )
         r = self._check(
             self._client.post("/api/operations/convert", json=body.model_dump())
@@ -108,7 +117,7 @@ class APIClient:
     def delete_note(self, path: str) -> schemas.NoteDeleteResponse:
         body = schemas.NoteDeleteRequest(path=path)
         r = self._check(
-            self._client.delete("/api/note", json=body.model_dump())
+            self._client.request("DELETE", "/api/note", json=body.model_dump())
         )
         return schemas.NoteDeleteResponse.model_validate_json(r.text)
 
@@ -119,7 +128,9 @@ class APIClient:
         )
         return schemas.InferenceResponse.model_validate_json(r.text)
 
-    def transcribe(self, audio_file: str, model_path: str | None = None) -> schemas.TranscriptionResponse:
+    def transcribe(
+        self, audio_file: str, model_path: str | None = None
+    ) -> schemas.TranscriptionResponse:
         body = schemas.TranscriptionRequest(audio_file=audio_file, model_path=model_path)
         r = self._check(
             self._client.post("/api/transcribe", json=body.model_dump())

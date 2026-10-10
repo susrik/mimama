@@ -133,6 +133,27 @@ class TestTools:
         assert "saved: projects/eurohpc/o.md" in text
         assert "# Minutes" in text
 
+    async def test_convert_transcript_instructions_and_context(
+        self, mcp_server: MCPServer, fake_llm: FakeLLMClient
+    ) -> None:
+        fake_llm.responses = ["# Minutes"]
+        text = await call_tool(
+            mcp_server,
+            "convert_transcript",
+            {
+                "folder": "projects/eurohpc",
+                "transcript": "talk",
+                "filename": "o.md",
+                "instructions": "make bullets",
+                "context": "EXTRA CONTEXT",
+            },
+        )
+        assert "saved: projects/eurohpc/o.md" in text
+        _, user = fake_llm.calls[0]
+        assert "EXTRA CONTEXT" in user
+        assert "make bullets" in user
+        assert "talk" in user
+
     async def test_cleanup_note(
         self, mcp_server: MCPServer, fake_llm: FakeLLMClient
     ) -> None:

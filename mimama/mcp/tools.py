@@ -90,7 +90,11 @@ def register_tools(mcp_server: MCPServer, api: APIClient) -> None:
 
     @tool()
     def convert_transcript(
-        folder: str, transcript: str, filename: str = ""
+        folder: str,
+        transcript: str,
+        filename: str = "",
+        instructions: str | None = None,
+        context: str | None = None,
     ) -> str:
         """Convert a raw meeting transcript into meeting minutes (LLM-powered).
 
@@ -101,8 +105,16 @@ def register_tools(mcp_server: MCPServer, api: APIClient) -> None:
             folder: target folder relative to the notes root.
             transcript: the raw transcript text.
             filename: optional output filename (default: dated, e.g. 2026-08-30-minutes.md).
+            instructions: optional override for the transcript prompt.
+            context: optional free-form context prepended to the instructions.
         """
-        result = api.convert(folder, transcript, filename=filename or None)
+        result = api.convert(
+            folder,
+            transcript,
+            filename=filename or None,
+            instructions=instructions,
+            context=context,
+        )
         return f"saved: {result.path}\n\n{result.content}"
 
     @tool()

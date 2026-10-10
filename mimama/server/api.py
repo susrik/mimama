@@ -188,7 +188,13 @@ def convert(
 ) -> schemas.OperationResponse:
     try:
         result = transcript_to_minutes(
-            store, llm, body.folder, body.transcript, filename=body.filename
+            store,
+            llm,
+            body.folder,
+            body.transcript,
+            filename=body.filename,
+            instructions=body.instructions,
+            context=body.context,
         )
     except NoteError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

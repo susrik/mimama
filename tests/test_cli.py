@@ -156,6 +156,27 @@ class TestConvert:
         assert "saved: projects/eurohpc/out.md" in result.output
         assert "# Minutes" in result.output
 
+    def test_context_and_instructions_flags(
+        self, run: type[_Runner], fake_llm: FakeLLMClient, tmp_path: Path
+    ) -> None:
+        fake_llm.responses = ["# Minutes"]
+        transcript = tmp_path / "t.txt"
+        transcript.write_text("raw talk", encoding="utf-8")
+        result = run.cli(
+            "convert",
+            "--folder", "projects/eurohpc",
+            "--transcript-file", str(transcript),
+            "--filename", "out.md",
+            "--instructions", "make bullets",
+            "--context", "EXTRA CONTEXT",
+            "--yes",
+        )
+        assert result.exit_code == 0
+        _, user = fake_llm.calls[0]
+        assert "EXTRA CONTEXT" in user
+        assert "make bullets" in user
+        assert "raw talk" in user
+
     def test_guided_folder_picker_and_confirm(
         self, run: type[_Runner], fake_llm: FakeLLMClient, tmp_path: Path
     ) -> None:

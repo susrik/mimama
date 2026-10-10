@@ -153,6 +153,7 @@ def create_note_submit(
                 content,
                 filename=filename,
                 instructions=transcript_instructions or None,
+                context=context or None,
             )
             path, written_content = result.path, result.content
         else:

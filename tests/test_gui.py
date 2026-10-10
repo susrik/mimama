@@ -89,12 +89,14 @@ class TestConvert:
                 "ai": "on",
                 "transcript": "on",
                 "transcript_instructions": "custom instructions",
+                "context": "EXTRA CONTEXT",
             },
         )
         assert "Saved: projects/eurohpc/o.md" in response.text
         assert "# Minutes body" in response.text
         _, user = fake_llm.calls[0]
         assert "custom instructions" in user
+        assert "EXTRA CONTEXT" in user
         assert "t" in user
 
     def test_default_filename_when_blank(self, client: TestClient) -> None:

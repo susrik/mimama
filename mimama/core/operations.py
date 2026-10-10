@@ -61,17 +61,21 @@ def transcript_to_minutes(
     transcript: str,
     filename: str | None = None,
     instructions: str | None = None,
+    context: str | None = None,
 ) -> OperationResult:
     """Convert a raw transcript to meeting minutes, written into ``folder``.
 
-    ``instructions`` is the (editable, GUI-supplied) prompt describing what to
-    do with the transcript; it defaults to :data:`DEFAULT_TRANSCRIPT_INSTRUCTIONS`.
+    ``instructions`` is the (editable) prompt describing what to do with the
+    transcript; it defaults to :data:`DEFAULT_TRANSCRIPT_INSTRUCTIONS`.
+    ``context`` is optional free-form context prepended to the instructions.
     """
     filename = filename or default_minutes_filename()
     target = (PurePosixPath(folder) / filename).as_posix()
+    instructions = instructions or DEFAULT_TRANSCRIPT_INSTRUCTIONS
+    user = f"{context}\n\n{instructions}" if context else instructions
     content = llm.complete(
         system=_system_prompt(store, folder),
-        user=f"{instructions or DEFAULT_TRANSCRIPT_INSTRUCTIONS}\n--- TRANSCRIPT ---\n{transcript}",
+        user=f"{user}\n--- TRANSCRIPT ---\n{transcript}",
     )
     written = store.write(target, content)
     return OperationResult(path=written, content=content)

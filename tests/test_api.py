@@ -211,6 +211,24 @@ class TestConvert:
         response = client.post("/api/operations/convert", json=body.model_dump())
         assert response.status_code == 400
 
+    def test_instructions_and_context_forwarded(
+        self, client: TestClient, fake_llm: FakeLLMClient
+    ) -> None:
+        body = schemas.ConvertRequest(
+            folder="projects/eurohpc",
+            transcript="raw talk",
+            filename="out.md",
+            instructions="make bullets",
+            context="EXTRA CONTEXT",
+        )
+        response = client.post("/api/operations/convert", json=body.model_dump())
+        assert response.status_code == 200
+        _, user = fake_llm.calls[0]
+        assert "EXTRA CONTEXT" in user
+        assert "make bullets" in user
+        assert "raw talk" in user
+        assert user.index("EXTRA CONTEXT") < user.index("make bullets")
+
 
 class TestCleanup:
     def test_rewrites(self, client: TestClient, fake_llm: FakeLLMClient) -> None:
