@@ -14,11 +14,17 @@ from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from mimama.config import Config
-from mimama.core.context import AttachedFile, assemble_context, list_context_files
+from mimama.core.context import (
+    AttachedFile,
+    FileContextError,
+    assemble_context,
+    decode_attachment,
+    list_context_files,
+)
 from mimama.core.git_ops import git_enabled, stage_file
 from mimama.core.inference_jobs import DONE as JOB_DONE
 from mimama.core.inference_jobs import InferenceJob, InferenceJobRegistry
@@ -76,16 +82,14 @@ def _maybe_stage(config: Config, *paths: str) -> None:
             stage_file(config, path)
 
 
-def _attached_from_uploads(files: list[UploadFile] | None) -> list[AttachedFile] | None:
+def _attached_from_uploads(
+    files: list[UploadFile] | None, max_chars: int | None = None
+) -> list[AttachedFile] | None:
     """Convert multipart-uploaded files into attached-file context."""
     if not files:
         return None
     attached = [
-        AttachedFile(
-            name=f.filename or "upload",
-            content=f.file.read().decode("utf-8", errors="replace"),
-        )
-        for f in files
+        decode_attachment(f.filename or "upload", f.file.read(), max_chars) for f in files
     ]
     return attached or None
 
@@ -169,13 +173,13 @@ def create_note_submit(
                 filename=filename,
                 instructions=transcript_instructions or None,
                 context=context or None,
-                files=_attached_from_uploads(context_files),
+                files=_attached_from_uploads(context_files, config.attachments.max_file_chars),
             )
             path, written_content = result.path, result.content
         else:
             written_content = content
             path = store.write(target, written_content)
-    except (NoteError, LLMError) as exc:
+    except (NoteError, LLMError, FileContextError) as exc:
         return _error(request, str(exc))
 
     _maybe_stage(config, path)
@@ -184,7 +188,7 @@ def create_note_submit(
     )
 
 
-@router.post("/gui/note/create/generate/start")
+@router.post("/gui/note/create/generate/start", response_model=None)
 def generate_start(
     request: Request,
     folder: Annotated[str, Form()] = "",
@@ -192,7 +196,7 @@ def generate_start(
     content: Annotated[str, Form()] = "",
     context: Annotated[str, Form()] = "",
     context_files: Annotated[list[UploadFile] | None, File()] = None,
-) -> dict[str, str]:
+) -> dict[str, str] | JSONResponse:
     """Start a background, streamed free-form AI generation for the "new
     file" flow. On success the job writes the note itself and its ``html``
     is a rendered ``result.html`` fragment, ready to swap into ``#main``."""
@@ -201,7 +205,10 @@ def generate_start(
     llm = _llm(request)
     resolved_filename = filename or default_note_filename()
     target = (PurePosixPath(folder) / resolved_filename).as_posix()
-    files = _attached_from_uploads(context_files)
+    try:
+        files = _attached_from_uploads(context_files, config.attachments.max_file_chars)
+    except FileContextError as exc:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     def work(job: InferenceJob) -> None:
         written_content = generate_note_content(

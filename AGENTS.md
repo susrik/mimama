@@ -29,6 +29,14 @@ and `/gui`) is staged (never committed) via `mimama/core/git_ops.py`.
   Also hosts optional *attached-file* context: `read_files` (server paths →
   `AttachedFile`), `format_files_context`, and `FileContextError` for appending
   local files to an inference prompt as labelled `# Attached file: …` blocks.
+  Both the server-path and GUI-upload routes go through `decode_attachment`,
+  which treats content as UTF-8 text or, for `.pptx`/`.docx`/`.pdf`/`.xlsx`/
+  `.doc`, extracts text (see `documents.py`), bounded by
+  `attachments.max_file_chars`.
+- `mimama/core/documents.py` — best-effort text extraction from binary
+  documents (PowerPoint, Word, PDF, Excel, legacy `.doc` via `olefile`). Each
+  extractor raises `DocumentError` on failure; `decode_attachment` turns that
+  into `FileContextError`.
 - `mimama/core/naming.py` — `default_note_filename()`: dated, Heroku-style
   default filename (`YYYY-MM-DD-adjective-noun.md`) for the "new file" GUI flow.
 - `mimama/core/llm.py` — `LLMClient` wrapping the openai SDK against any

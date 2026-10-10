@@ -187,7 +187,11 @@ def convert(
     store: Store, llm: LLM, config: Conf, body: schemas.ConvertRequest
 ) -> schemas.OperationResponse:
     try:
-        files = read_files(body.context_files) if body.context_files else None
+        files = (
+            read_files(body.context_files, config.attachments.max_file_chars)
+            if body.context_files
+            else None
+        )
         result = transcript_to_minutes(
             store,
             llm,

@@ -11,7 +11,7 @@ import threading
 from collections.abc import Callable
 from typing import Any, Protocol
 
-from openai import OpenAI
+from openai import OpenAI, OpenAIError
 
 from mimama.config import LLMConfig
 
@@ -70,14 +70,17 @@ class LLMClient:
         If ``cancel_event`` is set at any point, the upstream connection is
         closed immediately and :class:`LLMCancelled` is raised.
         """
-        stream = self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            stream=True,
-        )
+        try:
+            stream = self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                stream=True,
+            )
+        except OpenAIError as exc:
+            raise LLMError(f"LLM request failed: {exc}") from exc
         parts: list[str] = []
         try:
             for chunk in stream:
@@ -89,6 +92,8 @@ class LLMClient:
                 if delta:
                     parts.append(delta)
                     on_chunk(delta)
+        except OpenAIError as exc:
+            raise LLMError(f"LLM stream failed: {exc}") from exc
         finally:
             stream.close()
         if not parts:

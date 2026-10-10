@@ -141,6 +141,24 @@ class TestConvert:
         assert "# Attached file: ref.txt" in user
         assert "UPLOADED FILE DATA" in user
 
+    def test_unreadable_context_file_surfaces_error(
+        self, client: TestClient, fake_llm: FakeLLMClient
+    ) -> None:
+        response = client.post(
+            "/gui/note/create",
+            data={
+                "folder": "projects/eurohpc",
+                "filename": "o.md",
+                "content": "t",
+                "ai": "on",
+                "transcript": "on",
+            },
+            files={"context_files": ("img.png", b"\x89PNG\r\n\x1a\n\x00", "image/png")},
+        )
+        assert response.status_code == 200
+        assert "not a text file" in response.text
+        assert fake_llm.calls == []
+
 
 class TestGenerate:
     """Free-form AI generation: a streamed job that writes the note itself."""
@@ -180,6 +198,15 @@ class TestGenerate:
         )
         assert payload["error"] is not None
         assert "escapes notes root" in payload["error"]
+
+    def test_unreadable_context_file_returns_400(self, client: TestClient) -> None:
+        response = client.post(
+            "/gui/note/create/generate/start",
+            data={"folder": "projects/eurohpc", "filename": "gen.md", "content": "seed"},
+            files={"context_files": ("img.png", b"\x89PNG\r\n\x1a\n\x00", "image/png")},
+        )
+        assert response.status_code == 400
+        assert "not a text file" in response.json()["detail"]
 
     def test_uploaded_context_files_reach_prompt(
         self, client: TestClient, fake_llm: FakeLLMClient
