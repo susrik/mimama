@@ -169,6 +169,8 @@ def query(ctx: click.Context, question: str | None) -> None:
 @click.option("--transcript-file", default=None, type=click.Path(exists=True),
               help="Read the transcript from this file (prompted if omitted).")
 @click.option("--filename", default=None, help="Output filename (dated default).")
+@click.option("--instructions", default=None, help="Override the transcript instructions.")
+@click.option("--context", default=None, help="Additional context for the transcript.")
 @click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
 @click.pass_context
 def convert(
@@ -176,6 +178,8 @@ def convert(
     folder: str | None,
     transcript_file: str | None,
     filename: str | None,
+    instructions: str | None,
+    context: str | None,
     yes: bool,
 ) -> None:
     """Convert a raw transcript into meeting minutes (LLM-powered)."""
@@ -189,7 +193,9 @@ def convert(
         click.echo(f"Transcript: {len(transcript)} characters")
         if not yes and not click.confirm("Send to LLM?", default=True):
             raise click.Abort()
-        result = api.convert(folder, transcript, filename=filename)
+        result = api.convert(
+            folder, transcript, filename=filename, instructions=instructions, context=context
+        )
     except APIError as exc:
         _fail(exc)
     click.echo(f"saved: {result.path}")

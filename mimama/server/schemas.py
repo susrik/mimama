@@ -115,6 +115,8 @@ class ConvertRequest(BaseModel):
     folder: str
     transcript: str
     filename: str | None = None
+    instructions: str | None = None
+    context: str | None = None
 
 
 class CleanupRequest(BaseModel):
