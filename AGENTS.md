@@ -26,6 +26,9 @@ and `/gui`) is staged (never committed) via `mimama/core/git_ops.py`.
 - `mimama/core/context.py` — hierarchical AGENTS.md assembly
   (`assemble_context`) plus a structured `list_context_files` used by the GUI
   to show which AGENTS.md files will be used, with per-file hover tooltips.
+  Also hosts optional *attached-file* context: `read_files` (server paths →
+  `AttachedFile`), `format_files_context`, and `FileContextError` for appending
+  local files to an inference prompt as labelled `# Attached file: …` blocks.
 - `mimama/core/naming.py` — `default_note_filename()`: dated, Heroku-style
   default filename (`YYYY-MM-DD-adjective-noun.md`) for the "new file" GUI flow.
 - `mimama/core/llm.py` — `LLMClient` wrapping the openai SDK against any
@@ -72,6 +75,11 @@ and `/gui`) is staged (never committed) via `mimama/core/git_ops.py`.
     latter goes through `/gui/note/create/generate/{start,stream,cancel}`
     instead, a streamed `InferenceJob` behind a console-popup modal with a
     Stop button that writes the note itself and auto-closes on success.
+    When AI mode is on, a drop/click-to-choose multi-select lets the user
+    attach local files whose contents are appended to the inference context;
+    the GUI uploads them (`context_files` multipart), while the stable
+    `/api/operations/convert` endpoint takes `context_files` as server-side
+    paths instead.
     `/gui/note/inference` and `/gui/query` follow the same
     start/stream/cancel job pattern. `/api/operations/convert`,
     `/api/operations/inference`, `/api/query`, and `/api/transcribe` remain

@@ -13,12 +13,12 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import Annotated
 
-from fastapi import APIRouter, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
 from mimama.config import Config
-from mimama.core.context import assemble_context, list_context_files
+from mimama.core.context import AttachedFile, assemble_context, list_context_files
 from mimama.core.git_ops import git_enabled, stage_file
 from mimama.core.inference_jobs import DONE as JOB_DONE
 from mimama.core.inference_jobs import InferenceJob, InferenceJobRegistry
@@ -74,6 +74,20 @@ def _maybe_stage(config: Config, *paths: str) -> None:
     if git_enabled(config):
         for path in paths:
             stage_file(config, path)
+
+
+def _attached_from_uploads(files: list[UploadFile] | None) -> list[AttachedFile] | None:
+    """Convert multipart-uploaded files into attached-file context."""
+    if not files:
+        return None
+    attached = [
+        AttachedFile(
+            name=f.filename or "upload",
+            content=f.file.read().decode("utf-8", errors="replace"),
+        )
+        for f in files
+    ]
+    return attached or None
 
 
 def _job_events(registry: InferenceJobRegistry, job_id: str, unknown_message: str) -> Iterator[str]:
@@ -138,6 +152,7 @@ def create_note_submit(
     context: Annotated[str, Form()] = "",
     transcript: Annotated[str | None, Form()] = None,
     transcript_instructions: Annotated[str, Form()] = "",
+    context_files: Annotated[list[UploadFile] | None, File()] = None,
 ) -> HTMLResponse:
     store = _store(request)
     config = _config(request)
@@ -154,6 +169,7 @@ def create_note_submit(
                 filename=filename,
                 instructions=transcript_instructions or None,
                 context=context or None,
+                files=_attached_from_uploads(context_files),
             )
             path, written_content = result.path, result.content
         else:
@@ -175,6 +191,7 @@ def generate_start(
     filename: Annotated[str, Form()] = "",
     content: Annotated[str, Form()] = "",
     context: Annotated[str, Form()] = "",
+    context_files: Annotated[list[UploadFile] | None, File()] = None,
 ) -> dict[str, str]:
     """Start a background, streamed free-form AI generation for the "new
     file" flow. On success the job writes the note itself and its ``html``
@@ -184,10 +201,18 @@ def generate_start(
     llm = _llm(request)
     resolved_filename = filename or default_note_filename()
     target = (PurePosixPath(folder) / resolved_filename).as_posix()
+    files = _attached_from_uploads(context_files)
 
     def work(job: InferenceJob) -> None:
         written_content = generate_note_content(
-            store, llm, target, context, content, on_chunk=job.emit, cancel_event=job.cancel_event
+            store,
+            llm,
+            target,
+            context,
+            content,
+            on_chunk=job.emit,
+            cancel_event=job.cancel_event,
+            files=files,
         )
         path = store.write(target, written_content)
         _maybe_stage(config, path)

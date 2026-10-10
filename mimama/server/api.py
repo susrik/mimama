@@ -12,7 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 
 from mimama.config import Config
-from mimama.core.context import assemble_context
+from mimama.core.context import FileContextError, assemble_context, read_files
 from mimama.core.git_ops import git_enabled, stage_file
 from mimama.core.llm import LLMError, SupportsComplete
 from mimama.core.notes import NoteError, NoteStore
@@ -187,6 +187,7 @@ def convert(
     store: Store, llm: LLM, config: Conf, body: schemas.ConvertRequest
 ) -> schemas.OperationResponse:
     try:
+        files = read_files(body.context_files) if body.context_files else None
         result = transcript_to_minutes(
             store,
             llm,
@@ -195,8 +196,11 @@ def convert(
             filename=body.filename,
             instructions=body.instructions,
             context=body.context,
+            files=files,
         )
     except NoteError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileContextError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc

@@ -1,6 +1,7 @@
 """Tests for the /api JSON surface."""
 
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -228,6 +229,36 @@ class TestConvert:
         assert "make bullets" in user
         assert "raw talk" in user
         assert user.index("EXTRA CONTEXT") < user.index("make bullets")
+
+    def test_context_files_read_and_forwarded(
+        self, client: TestClient, fake_llm: FakeLLMClient, tmp_path: Path
+    ) -> None:
+        fake_llm.responses = ["# Minutes"]
+        ref = tmp_path / "ref.txt"
+        ref.write_text("SERVER FILE DATA", encoding="utf-8")
+        body = schemas.ConvertRequest(
+            folder="projects/eurohpc",
+            transcript="raw talk",
+            filename="out.md",
+            context_files=[str(ref)],
+        )
+        response = client.post("/api/operations/convert", json=body.model_dump())
+        assert response.status_code == 200
+        _, user = fake_llm.calls[0]
+        assert "# Attached file: ref.txt" in user
+        assert "SERVER FILE DATA" in user
+
+    def test_missing_context_file_400(
+        self, client: TestClient, fake_llm: FakeLLMClient
+    ) -> None:
+        body = schemas.ConvertRequest(
+            folder="projects/eurohpc",
+            transcript="t",
+            context_files=["/does/not/exist.txt"],
+        )
+        response = client.post("/api/operations/convert", json=body.model_dump())
+        assert response.status_code == 400
+        assert "no such file" in response.json()["detail"]
 
 
 class TestCleanup:

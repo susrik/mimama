@@ -117,6 +117,7 @@ class ConvertRequest(BaseModel):
     filename: str | None = None
     instructions: str | None = None
     context: str | None = None
+    context_files: list[str] = Field(default_factory=list)
 
 
 class CleanupRequest(BaseModel):

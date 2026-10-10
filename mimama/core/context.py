@@ -8,9 +8,13 @@ target folder — root first, so general context precedes specific context.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 
 from mimama.core.notes import CONTEXT_FILENAME, NoteStore
+
+
+class FileContextError(Exception):
+    """A server-side file selected for AI context could not be read."""
 
 
 @dataclass
@@ -19,6 +23,45 @@ class ContextFile:
 
     origin: str  # relative folder, "" for the notes root
     content: str
+
+
+@dataclass
+class AttachedFile:
+    """One local file added to the AI inference context (by upload or path).
+
+    ``name`` is only for labeling the file in the assembled prompt; it is
+    never used as a filesystem path on the server.
+    """
+
+    name: str
+    content: str
+
+
+def read_files(paths: list[str]) -> list[AttachedFile]:
+    """Read arbitrary server files into :class:`AttachedFile` instances.
+
+    Paths may be absolute or relative to the server's working directory.
+    Raises :class:`FileContextError` if a path is missing or not UTF-8 text.
+    """
+    attached = []
+    for path in paths:
+        candidate = Path(path)
+        if not candidate.is_file():
+            raise FileContextError(f"no such file: {path!r}")
+        try:
+            content = candidate.read_text(encoding="utf-8")
+        except UnicodeDecodeError as exc:
+            raise FileContextError(f"not a text file: {path!r}") from exc
+        attached.append(AttachedFile(name=candidate.name, content=content))
+    return attached
+
+
+def format_files_context(files: list[AttachedFile]) -> str:
+    """Render attached files as a labelled context block ("" when empty)."""
+    if not files:
+        return ""
+    blocks = [f"# Attached file: {f.name}\n\n{f.content.strip()}" for f in files]
+    return "\n\n---\n\n".join(blocks)
 
 
 def list_context_files(store: NoteStore, relative: str) -> list[ContextFile]:

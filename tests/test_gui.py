@@ -68,6 +68,14 @@ class TestConvert:
         assert "ROOT CONTEXT" in response.text
         assert "PROJECTS CONTEXT" in response.text
 
+    def test_new_note_form_uses_multipart_encoding(self, client: TestClient) -> None:
+        response = client.get("/gui/note/create")
+        assert response.status_code == 200
+        # htmx 2.x no longer auto-detects file inputs, so the form must declare
+        # multipart encoding explicitly or uploaded context files are sent as a
+        # urlencoded string and FastAPI rejects the request with a 422.
+        assert 'enctype="multipart/form-data"' in response.text
+
     def test_plain_create(self, client: TestClient) -> None:
         response = client.post(
             "/gui/note/create",
@@ -113,6 +121,26 @@ class TestConvert:
         )
         assert "escapes notes root" in response.text
 
+    def test_ai_transcript_includes_uploaded_context_files(
+        self, client: TestClient, fake_llm: FakeLLMClient
+    ) -> None:
+        fake_llm.responses = ["# Minutes body"]
+        response = client.post(
+            "/gui/note/create",
+            data={
+                "folder": "projects/eurohpc",
+                "filename": "o.md",
+                "content": "t",
+                "ai": "on",
+                "transcript": "on",
+            },
+            files={"context_files": ("ref.txt", b"UPLOADED FILE DATA", "text/plain")},
+        )
+        assert response.status_code == 200
+        _, user = fake_llm.calls[0]
+        assert "# Attached file: ref.txt" in user
+        assert "UPLOADED FILE DATA" in user
+
 
 class TestGenerate:
     """Free-form AI generation: a streamed job that writes the note itself."""
@@ -152,6 +180,27 @@ class TestGenerate:
         )
         assert payload["error"] is not None
         assert "escapes notes root" in payload["error"]
+
+    def test_uploaded_context_files_reach_prompt(
+        self, client: TestClient, fake_llm: FakeLLMClient
+    ) -> None:
+        fake_llm.responses = ["generated body"]
+        payload = _run_job(
+            client,
+            "/gui/note/create/generate/start",
+            "/gui/note/create/generate/stream",
+            data={
+                "folder": "projects/eurohpc",
+                "filename": "gen.md",
+                "content": "seed",
+                "context": "write about X",
+            },
+            files={"context_files": ("ref.txt", b"UPLOADED FILE DATA", "text/plain")},
+        )
+        assert payload["error"] is None
+        _, user = fake_llm.calls[0]
+        assert "# Attached file: ref.txt" in user
+        assert "UPLOADED FILE DATA" in user
 
     def test_cancel_sets_job_cancel_event(
         self, client: TestClient, app, fake_llm: FakeLLMClient  # type: ignore[no-untyped-def]
